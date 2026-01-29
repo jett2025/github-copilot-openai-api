@@ -1,14 +1,19 @@
-from functools import cache
+"""
+聊天流处理模块
+
+提供统一的流式和非流式聊天入口。
+"""
+
 from typing import Optional, AsyncGenerator, Dict, Any
 
-import async_lru
 import aiohttp
 import base64
 
-from api.chat_api import ChatAPI, is_responses_model
+from api.chat_api import ChatAPI
 from auth.device_auth import DeviceAuth
 from auth.envs_auth import EnvsAuth
 from auth.hosts_auth import HostsAuth
+from config import is_responses_model
 from loguru import logger
 
 
@@ -37,13 +42,11 @@ def normalize_messages(messages: list) -> list:
         # 处理 content (支持字符串或列表，保留多模态图片信息)
         content = msg.get("content")
         if isinstance(content, list):
-            # 保留列表结构，以支持 image_url
             normalized_msg["content"] = content
         elif content is not None:
             normalized_msg["content"] = content
         else:
             # content 为 None 时，对于有 tool_calls 的 assistant 消息保持 None
-            # 对于其他消息设置为空字符串
             if msg.get("role") == "assistant" and "tool_calls" in msg:
                 normalized_msg["content"] = None
             else:
@@ -90,69 +93,65 @@ async def process_images(messages: list) -> list:
     return messages
 
 
-async def run_stream(
-        data: dict
-) -> AsyncGenerator[str, None]:
+async def _prepare_request(data: dict) -> tuple[ChatAPI, list, str, float, dict]:
+    """
+    准备请求所需的参数
+
+    Args:
+        data: 请求数据
+
+    Returns:
+        (ChatAPI 实例, 处理后的消息, 模型名称, 温度, 额外参数)
+
+    Raises:
+        ValueError: 认证失败或消息为空
+    """
+    token = await get_token()
+    if not token:
+        raise ValueError("未能获取有效的认证令牌")
+
+    chat = ChatAPI(token)
+    messages = data.get("messages", [])
+    model = data.get("model", "gpt-4")
+    temperature = data.get("temperature", 0.7)
+
+    if not messages:
+        raise ValueError("not found any message")
+
+    # 规范化消息格式并处理图片
+    normalized_messages = normalize_messages(messages)
+    normalized_messages = await process_images(normalized_messages)
+
+    extra_params = {}
+    if "tools" in data:
+        extra_params["tools"] = data["tools"]
+    if "tool_choice" in data:
+        extra_params["tool_choice"] = data["tool_choice"]
+
+    return chat, normalized_messages, model, temperature, extra_params
+
+
+async def run_stream(data: dict) -> AsyncGenerator[str, None]:
     """运行流式聊天，返回符合 OpenAI SSE 规范的数据流"""
-    token = await get_token()
-    if not token:
-        raise ValueError("未能获取有效的认证令牌")
-
-    chat = ChatAPI(token)
-    messages = data.get("messages", [])
-    model = data.get("model", "gpt-4")
-    temperature = data.get("temperature", 0.7)
-    if not messages:
-        raise ValueError("not found any message")
-
-    # 规范化消息格式并处理图片
-    normalized_messages = normalize_messages(messages)
-    normalized_messages = await process_images(normalized_messages)
-
-    extra_params = {}
-    if "tools" in data:
-        extra_params["tools"] = data["tools"]
-    if "tool_choice" in data:
-        extra_params["tool_choice"] = data["tool_choice"]
+    chat, messages, model, temperature, extra_params = await _prepare_request(data)
 
     # 根据模型选择 API 端点
     if is_responses_model(model):
         logger.info(f"Using /responses API for model: {model}")
-        async for chunk in chat.responses_stream_chat(normalized_messages, model=model, temperature=temperature, **extra_params):
+        async for chunk in chat.responses_stream_chat(messages, model=model, temperature=temperature, **extra_params):
             yield chunk
     else:
-        async for chunk in chat.stream_chat(normalized_messages, model=model, temperature=temperature, **extra_params):
+        async for chunk in chat.stream_chat(messages, model=model, temperature=temperature, **extra_params):
             yield chunk
 
 
-async def run(
-        data: dict
-) -> Dict[str, Any]:
+async def run(data: dict) -> Dict[str, Any]:
     """运行非流式聊天，返回完整的响应"""
-    token = await get_token()
-    if not token:
-        raise ValueError("未能获取有效的认证令牌")
-
-    chat = ChatAPI(token)
-    messages = data.get("messages", [])
-    model = data.get("model", "gpt-4")
-    temperature = data.get("temperature", 0.7)
-    if not messages:
-        raise ValueError("not found any message")
-
-    # 规范化消息格式并处理图片
-    normalized_messages = normalize_messages(messages)
-    normalized_messages = await process_images(normalized_messages)
-
-    extra_params = {}
-    if "tools" in data:
-        extra_params["tools"] = data["tools"]
-    if "tool_choice" in data:
-        extra_params["tool_choice"] = data["tool_choice"]
+    chat, messages, model, temperature, extra_params = await _prepare_request(data)
 
     # 根据模型选择 API 端点
     if is_responses_model(model):
         logger.info(f"Using /responses API for model: {model}")
-        return await chat.responses_chat(normalized_messages, model=model, temperature=temperature, **extra_params)
+        return await chat.responses_chat(messages, model=model, temperature=temperature, **extra_params)
     else:
-        return await chat.chat(normalized_messages, model=model, temperature=temperature, **extra_params)
+        return await chat.chat(messages, model=model, temperature=temperature, **extra_params)
