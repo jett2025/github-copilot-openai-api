@@ -20,7 +20,12 @@ RUN uv pip install --no-cache-dir --system \
 # 复制项目文件
 COPY api/ ./api/
 COPY auth/ ./auth/
+COPY middleware/ ./middleware/
+COPY routes/ ./routes/
+COPY services/ ./services/
 COPY templates/ ./templates/
+COPY config.py ./
+COPY exceptions.py ./
 COPY server.py ./
 
 # 设置环境变量
@@ -37,4 +42,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:8000/v1/models || exit 1
 
 # 启动应用
-CMD ["python", "server.py"] 
+CMD ["python", "server.py"]
