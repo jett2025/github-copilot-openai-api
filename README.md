@@ -152,9 +152,12 @@ github-copilot-openai-api/
 │   ├── chat.py            # /v1/chat/completions 路由
 │   ├── claude.py          # /v1/messages 路由
 │   ├── responses.py       # /v1/responses 路由
-│   └── models.py          # /v1/models 路由
+│   ├── models.py          # /v1/models 路由
+│   └── usage.py           # /usage 用量查询路由
 ├── services/
 │   └── message_converter.py  # OpenAI/Claude 消息格式转换
+├── utils/
+│   └── retry.py           # 重试工具
 ├── templates/
 │   └── auth.html          # 设备认证页面
 ├── Dockerfile
@@ -252,7 +255,7 @@ environment:
 | gpt-4o-mini                | claude-opus-4.5   |
 | claude-opus-4-5-20251101   | claude-opus-4.5   |
 | claude-sonnet-4-5-20250929 | claude-sonnet-4.5 |
-| claude-haiku-4-5-20251001  | claude-haiku-4.5 |
+| claude-haiku-4-5-20251001  | claude-haiku-4.5  |
 
 _注：设置 `MODEL_MAPPING` 后将完全覆盖默认映射，未映射的模型名将直接透传。_
 
@@ -303,6 +306,7 @@ export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
 | `POST /v1/responses`        | OpenAI Responses API 兼容（GPT-5 Codex 等） |
 | `GET /v1/models`            | 获取支持的模型列表                          |
 | `GET /auth/device`          | 设备认证页面                                |
+| `GET /usage`                | 查询用量                                    |
 
 ### 使用示例
 
