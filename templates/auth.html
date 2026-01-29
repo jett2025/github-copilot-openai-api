@@ -4,216 +4,364 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GitHub Copilot 设备认证</title>
+
+    <!-- Vue.js v3.5.13 -->
+    <script src="https://registry.npmmirror.com/vue/3.5.13/files/dist/vue.global.prod.js"></script>
+
+    <!-- Tailwind CSS v3.4.10 -->
+    <script src="https://registry.npmmirror.com/tailwindcss-cdn/3.4.10/files/tailwindcss.js"></script>
+
+    <!-- Font Awesome v6.7.2 -->
+    <link
+      rel="stylesheet"
+      href="https://registry.npmmirror.com/@fortawesome/fontawesome-free/6.7.2/files/css/all.min.css"
+    />
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              github: {
+                bg: '#0d1117',
+                card: '#161b22',
+                border: '#30363d',
+                text: '#c9d1d9',
+                muted: '#8b949e',
+                primary: '#238636',
+                'primary-hover': '#2ea043',
+                warning: '#d29922',
+                success: '#238636',
+                error: '#f85149',
+              }
+            }
+          }
+        }
+      }
+    </script>
+
     <style>
-      :root {
-        --primary-color: #238636;
-        --secondary-color: #0d1117;
-        --text-color: #c9d1d9;
-        --border-color: #30363d;
-        --bg-color: #0d1117;
-        --card-bg: #161b22;
-        --hover-color: #2ea043;
-        --warning-color: #d29922;
-        --success-color: #238636;
-        --error-color: #f85149;
-      }
+      [v-cloak] { display: none; }
+    </style>
+  </head>
+  <body class="bg-github-bg text-github-text min-h-screen flex items-center justify-center font-sans">
+    <div id="app" v-cloak>
+      <div class="w-[90%] max-w-[500px] p-8 bg-github-card rounded-md border border-github-border shadow-lg mx-auto">
+        <!-- GitHub Logo -->
+        <div class="flex justify-center mb-4">
+          <i class="fa-brands fa-github text-white text-5xl"></i>
+        </div>
 
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica,
-          Arial, sans-serif;
-        margin: 0;
-        padding: 0;
-        background-color: var(--bg-color);
-        color: var(--text-color);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        min-height: 100vh;
-        line-height: 1.5;
-      }
+        <!-- 标题 -->
+        <h1 class="text-white text-xl font-semibold text-center mb-6">GitHub Copilot 设备认证</h1>
 
-      .container {
-        width: 90%;
-        max-width: 500px;
-        padding: 2rem;
-        background-color: var(--card-bg);
-        border-radius: 6px;
-        border: 1px solid var(--border-color);
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-      }
+        <!-- 步骤指示器 -->
+        <div class="bg-github-bg rounded-md border border-github-border p-4 mb-6">
+          <div
+            v-for="(stepItem, index) in steps"
+            :key="index"
+            class="flex items-start gap-3 py-2 transition-opacity duration-300"
+            :class="{
+              'opacity-100': currentStep === index + 1,
+              'opacity-80': currentStep > index + 1,
+              'opacity-40': currentStep < index + 1
+            }"
+          >
+            <!-- 步骤数字/勾选 -->
+            <div
+              class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 transition-all duration-300"
+              :class="{
+                'bg-github-primary text-white': currentStep === index + 1,
+                'bg-github-success text-white': currentStep > index + 1,
+                'bg-github-border text-github-text': currentStep < index + 1
+              }"
+            >
+              <i v-if="currentStep > index + 1" class="fa-solid fa-check"></i>
+              <span v-else>{{ index + 1 }}</span>
+            </div>
+            <!-- 步骤文字 -->
+            <div class="flex-1 text-sm">{{ stepItem }}</div>
+          </div>
+        </div>
 
-      h1 {
-        margin-top: 0;
-        color: white;
-        font-size: 1.5rem;
-        text-align: center;
-        margin-bottom: 1.5rem;
-      }
+        <!-- 设备码显示 -->
+        <div
+          class="bg-github-bg p-6 rounded-md border border-github-border font-mono text-3xl text-center text-white tracking-widest mb-2 select-all cursor-pointer hover:border-github-primary transition-colors"
+          @click="copyCode"
+          :title="copied ? '已复制!' : '点击复制'"
+        >
+          {{ userCode }}
+        </div>
+        <p class="text-xs text-github-muted text-center mb-6">
+          <i class="fa-regular fa-copy mr-1"></i>
+          点击上方设备码可复制
+        </p>
 
-      .code-display {
-        background-color: var(--secondary-color);
-        padding: 1.5rem;
-        border-radius: 6px;
-        border: 1px solid var(--border-color);
-        font-family: monospace;
-        font-size: 2rem;
-        text-align: center;
-        letter-spacing: 0.25rem;
-        margin: 1.5rem 0;
-        color: white;
-        position: relative;
-        transition: border-color 0.2s ease;
-      }
+        <!-- 按钮组 -->
+        <div class="flex flex-col gap-3">
+          <!-- 前往 GitHub 验证 -->
+          <a
+            :href="verificationUri"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn-primary flex items-center justify-center gap-2 py-3 px-4 rounded-md font-medium transition-all duration-200 no-underline"
+            :class="{ 'opacity-60 pointer-events-none': isExpired }"
+            @click="onOpenGitHub"
+          >
+            <i class="fa-solid fa-arrow-up-right-from-square"></i>
+            <span>{{ githubOpened ? '重新打开验证页面' : '前往 GitHub 验证' }}</span>
+          </a>
 
-      .code-display-hint {
-        font-size: 0.75rem;
-        color: #8b949e;
-        text-align: center;
-        margin-top: -1rem;
-        margin-bottom: 1rem;
-      }
+          <!-- 确认验证按钮 -->
+          <button
+            v-show="githubOpened"
+            type="button"
+            class="btn-confirm flex items-center justify-center gap-2 py-3 px-4 rounded-md font-medium transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed"
+            :class="{
+              'btn-loading': isVerifying,
+              'btn-success': isSuccess
+            }"
+            :disabled="isVerifying || isExpired || isSuccess"
+            @click="onConfirm"
+          >
+            <template v-if="isSuccess">
+              <i class="fa-solid fa-check"></i>
+              <span>认证完成</span>
+            </template>
+            <template v-else-if="!isVerifying">
+              <i class="fa-solid fa-check-double"></i>
+              <span>我已完成验证</span>
+            </template>
+          </button>
+        </div>
 
-      .instructions {
-        margin-bottom: 1.5rem;
-        text-align: center;
-      }
+        <!-- 状态提示 -->
+        <div
+          class="text-center mt-4 p-3 rounded-md text-sm transition-all duration-300"
+          :class="statusClass"
+        >
+          <i :class="statusIcon" class="mr-2"></i>
+          <span>{{ statusText }}</span>
+        </div>
 
-      .steps {
-        text-align: left;
-        margin: 1.5rem 0;
-        padding: 1rem;
-        background-color: var(--secondary-color);
-        border-radius: 6px;
-        border: 1px solid var(--border-color);
-      }
+        <!-- 倒计时 -->
+        <div
+          v-show="countdownStarted"
+          class="text-xs text-github-muted text-center mt-2"
+        >
+          <i class="fa-regular fa-clock mr-1"></i>
+          验证码有效期剩余：<span class="font-mono">{{ countdownDisplay }}</span>
+        </div>
+      </div>
+    </div>
 
-      .step {
-        display: flex;
-        align-items: flex-start;
-        gap: 0.75rem;
-        padding: 0.5rem 0;
-        opacity: 0.6;
-        transition: opacity 0.3s ease;
-      }
+    <script>
+      const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
 
-      .step.active {
-        opacity: 1;
-      }
+      createApp({
+        setup() {
+          // 从模板传入的数据
+          const userCode = ref('{{ user_code }}');
+          const deviceCode = ref('{{ device_code }}');
+          const verificationUri = ref('{{ verification_uri }}');
 
-      .step.completed {
-        opacity: 0.8;
-      }
+          // 步骤定义
+          const steps = [
+            '复制设备码并前往 GitHub 验证',
+            '在 GitHub 页面输入设备码并授权',
+            '返回此页面确认完成'
+          ];
 
-      .step-number {
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        background-color: var(--border-color);
-        color: var(--text-color);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 0.8rem;
-        font-weight: bold;
-        flex-shrink: 0;
-        transition: all 0.3s ease;
-      }
+          // 状态
+          const currentStep = ref(1);
+          const githubOpened = ref(false);
+          const isVerifying = ref(false);
+          const isSuccess = ref(false);
+          const isExpired = ref(false);
+          const copied = ref(false);
+          const countdownStarted = ref(false);
+          const remainingSeconds = ref(15 * 60);
+          const statusType = ref('waiting');
+          const statusMessage = ref('点击上方按钮开始验证流程');
 
-      .step.active .step-number {
-        background-color: var(--primary-color);
-        color: white;
-      }
+          let countdownInterval = null;
 
-      .step.completed .step-number {
-        background-color: var(--success-color);
-        color: white;
-      }
+          // 计算属性
+          const countdownDisplay = computed(() => {
+            const minutes = Math.floor(remainingSeconds.value / 60);
+            const seconds = remainingSeconds.value % 60;
+            return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+          });
 
-      .step.completed .step-number::after {
-        content: "✓";
-      }
+          const statusClass = computed(() => {
+            const classes = {
+              waiting: 'bg-github-muted/10 text-github-muted',
+              processing: 'bg-github-warning/10 text-github-warning',
+              success: 'bg-github-success/10 text-github-success',
+              error: 'bg-github-error/10 text-github-error'
+            };
+            return classes[statusType.value] || classes.waiting;
+          });
 
-      .step.completed .step-number span {
-        display: none;
-      }
+          const statusIcon = computed(() => {
+            const icons = {
+              waiting: 'fa-regular fa-hourglass-half',
+              processing: 'fa-solid fa-spinner fa-spin',
+              success: 'fa-solid fa-circle-check',
+              error: 'fa-solid fa-circle-exclamation'
+            };
+            return icons[statusType.value] || icons.waiting;
+          });
 
-      .step-text {
-        flex: 1;
-        font-size: 0.9rem;
-      }
+          const statusText = computed(() => statusMessage.value);
 
-      .button-group {
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-      }
+          // 方法
+          const copyCode = async () => {
+            try {
+              await navigator.clipboard.writeText(userCode.value);
+              copied.value = true;
+              setTimeout(() => { copied.value = false; }, 2000);
+            } catch (err) {
+              // 回退方案
+              const textarea = document.createElement('textarea');
+              textarea.value = userCode.value;
+              document.body.appendChild(textarea);
+              textarea.select();
+              document.execCommand('copy');
+              document.body.removeChild(textarea);
+              copied.value = true;
+              setTimeout(() => { copied.value = false; }, 2000);
+            }
+          };
 
-      .btn {
-        padding: 0.75rem 1rem;
-        border-radius: 6px;
-        border: none;
-        font-size: 1rem;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        width: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-        -webkit-appearance: none;
-        -moz-appearance: none;
-        appearance: none;
-        -webkit-tap-highlight-color: transparent;
-        touch-action: manipulation;
-      }
+          const startCountdown = () => {
+            if (countdownInterval) return;
+            countdownStarted.value = true;
 
-      .btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
+            countdownInterval = setInterval(() => {
+              remainingSeconds.value--;
+              if (remainingSeconds.value <= 0) {
+                clearInterval(countdownInterval);
+                isExpired.value = true;
+                statusType.value = 'error';
+                statusMessage.value = '验证码已过期，请刷新页面重新获取';
+              }
+            }, 1000);
+          };
 
+          const onOpenGitHub = () => {
+            githubOpened.value = true;
+            currentStep.value = 2;
+            statusType.value = 'processing';
+            statusMessage.value = '已打开 GitHub 验证页面，请在新窗口中完成授权';
+            startCountdown();
+          };
+
+          const onConfirm = async () => {
+            if (isVerifying.value || isExpired.value) return;
+
+            isVerifying.value = true;
+            currentStep.value = 3;
+            statusType.value = 'processing';
+            statusMessage.value = '正在验证授权状态...';
+
+            try {
+              const response = await fetch(`/auth/confirm/${deviceCode.value}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+              });
+
+              const data = await response.json();
+
+              if (data.success) {
+                isSuccess.value = true;
+                statusType.value = 'success';
+                statusMessage.value = '认证成功！您可以安全关闭此页面了';
+                countdownStarted.value = false;
+                if (countdownInterval) {
+                  clearInterval(countdownInterval);
+                }
+              } else {
+                handleError(data.error || '未知错误');
+              }
+            } catch (err) {
+              handleError('网络请求失败');
+            } finally {
+              isVerifying.value = false;
+            }
+          };
+
+          const handleError = (message) => {
+            if (message.includes('authorization_pending') || message.includes('等待')) {
+              statusType.value = 'processing';
+              statusMessage.value = '您似乎尚未在 GitHub 完成授权，请先完成授权后再点击确认';
+              currentStep.value = 2;
+            } else if (message.includes('expired') || message.includes('过期')) {
+              isExpired.value = true;
+              statusType.value = 'error';
+              statusMessage.value = '验证码已过期，请刷新页面重新获取';
+            } else {
+              statusType.value = 'error';
+              statusMessage.value = `验证失败：${message}，请重试`;
+            }
+          };
+
+          // 清理
+          onUnmounted(() => {
+            if (countdownInterval) {
+              clearInterval(countdownInterval);
+            }
+          });
+
+          return {
+            userCode,
+            deviceCode,
+            verificationUri,
+            steps,
+            currentStep,
+            githubOpened,
+            isVerifying,
+            isSuccess,
+            isExpired,
+            copied,
+            countdownStarted,
+            countdownDisplay,
+            statusClass,
+            statusIcon,
+            statusText,
+            copyCode,
+            onOpenGitHub,
+            onConfirm
+          };
+        }
+      }).mount('#app');
+    </script>
+
+    <style>
       .btn-primary {
-        background-color: var(--primary-color);
+        background-color: #238636;
         color: white;
       }
-
-      .btn-primary:hover:not(:disabled) {
-        background-color: var(--hover-color);
-      }
-
-      .btn-primary:active:not(:disabled) {
-        background-color: #1a7f2c;
-      }
-
-      .btn-secondary {
-        background-color: transparent;
-        color: var(--text-color);
-        border: 1px solid var(--border-color);
-      }
-
-      .btn-secondary:hover:not(:disabled) {
-        background-color: rgba(255, 255, 255, 0.1);
+      .btn-primary:hover:not(.opacity-60) {
+        background-color: #2ea043;
       }
 
       .btn-confirm {
-        background-color: var(--warning-color);
+        background-color: #d29922;
         color: white;
       }
-
       .btn-confirm:hover:not(:disabled) {
         background-color: #e3a826;
       }
 
-      .btn-confirm:active:not(:disabled) {
-        background-color: #c4911e;
+      .btn-success {
+        background-color: #238636 !important;
       }
 
       .btn-loading {
         position: relative;
         color: transparent !important;
       }
-
       .btn-loading::after {
         content: "";
         position: absolute;
@@ -222,308 +370,14 @@
         border: 2px solid transparent;
         border-top-color: white;
         border-radius: 50%;
-        -webkit-animation: spin 0.8s linear infinite;
         animation: spin 0.8s linear infinite;
-      }
-
-      @-webkit-keyframes spin {
-        to {
-          -webkit-transform: rotate(360deg);
-          transform: rotate(360deg);
-        }
       }
 
       @keyframes spin {
         to {
-          -webkit-transform: rotate(360deg);
           transform: rotate(360deg);
         }
       }
-
-      .github-logo {
-        display: flex;
-        justify-content: center;
-        margin-bottom: 1rem;
-      }
-
-      .github-logo svg {
-        width: 40px;
-        height: 40px;
-        fill: white;
-      }
-
-      .status {
-        text-align: center;
-        margin-top: 1rem;
-        padding: 0.75rem;
-        border-radius: 6px;
-        font-size: 0.9rem;
-        transition: all 0.3s ease;
-      }
-
-      .status.waiting {
-        background-color: rgba(139, 148, 158, 0.1);
-        color: #8b949e;
-      }
-
-      .status.processing {
-        background-color: rgba(210, 153, 34, 0.1);
-        color: var(--warning-color);
-      }
-
-      .status.success {
-        background-color: rgba(35, 134, 54, 0.1);
-        color: var(--success-color);
-      }
-
-      .status.error {
-        background-color: rgba(248, 81, 73, 0.1);
-        color: var(--error-color);
-      }
-
-      .timer {
-        font-size: 0.8rem;
-        color: #8b949e;
-        text-align: center;
-        margin-top: 0.5rem;
-      }
-
-      .hidden {
-        display: none !important;
-      }
-
-      /* Safari 链接按钮样式 */
-      a.btn {
-        text-decoration: none;
-        box-sizing: border-box;
-      }
-
-      @media (max-width: 600px) {
-        .container {
-          width: 100%;
-          border-radius: 0;
-          border-left: none;
-          border-right: none;
-        }
-      }
     </style>
-  </head>
-  <body>
-    <div class="container">
-      <div class="github-logo">
-        <svg viewBox="0 0 16 16">
-          <path
-            d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"
-          ></path>
-        </svg>
-      </div>
-      <h1>GitHub Copilot 设备认证</h1>
-
-      <!-- 步骤指示器 -->
-      <div class="steps">
-        <div class="step active" id="step1">
-          <div class="step-number"><span>1</span></div>
-          <div class="step-text">复制设备码并前往 GitHub 验证</div>
-        </div>
-        <div class="step" id="step2">
-          <div class="step-number"><span>2</span></div>
-          <div class="step-text">在 GitHub 页面输入设备码并授权</div>
-        </div>
-        <div class="step" id="step3">
-          <div class="step-number"><span>3</span></div>
-          <div class="step-text">返回此页面确认完成</div>
-        </div>
-      </div>
-
-      <!-- 设备码显示 -->
-      <div class="code-display" id="userCode">{{ user_code }}</div>
-      <div class="code-display-hint">请手动选择并复制上方设备码</div>
-
-      <!-- 按钮组 -->
-      <div class="button-group">
-        <!-- 使用 <a> 标签代替 button，以确保 Safari 兼容性 -->
-        <a href="{{ verification_uri }}" target="_blank" rel="noopener noreferrer" class="btn btn-primary" id="openGitHub">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M3.75 2h3.5a.75.75 0 0 1 0 1.5h-3.5a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25v-3.5a.75.75 0 0 1 1.5 0v3.5A1.75 1.75 0 0 1 12.25 14h-8.5A1.75 1.75 0 0 1 2 12.25v-8.5C2 2.784 2.784 2 3.75 2Zm6.854-1h4.146a.25.25 0 0 1 .25.25v4.146a.25.25 0 0 1-.427.177L13.03 4.03 9.28 7.78a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042l3.75-3.75-1.543-1.543A.25.25 0 0 1 10.604 1Z"/>
-          </svg>
-          前往 GitHub 验证
-        </a>
-        <button type="button" class="btn btn-confirm hidden" id="confirmBtn">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/>
-          </svg>
-          我已完成验证
-        </button>
-      </div>
-
-      <!-- 状态提示 -->
-      <div class="status waiting" id="status">
-        <span id="statusIcon">⏳</span>
-        <span id="statusText">点击上方按钮开始验证流程</span>
-      </div>
-      <div class="timer hidden" id="timer">验证码有效期剩余：<span id="countdown">15:00</span></div>
-    </div>
-
-    <script>
-      (function() {
-        "use strict";
-
-        // 状态管理
-        var state = {
-          step: 1,
-          githubOpened: false,
-          verifying: false,
-          countdownStarted: false,
-          expiresAt: Date.now() + 15 * 60 * 1000 // 15分钟有效期
-        };
-
-        // DOM 元素
-        var elements = {
-          openGitHub: document.getElementById("openGitHub"),
-          confirmBtn: document.getElementById("confirmBtn"),
-          status: document.getElementById("status"),
-          statusIcon: document.getElementById("statusIcon"),
-          statusText: document.getElementById("statusText"),
-          timer: document.getElementById("timer"),
-          countdown: document.getElementById("countdown"),
-          step1: document.getElementById("step1"),
-          step2: document.getElementById("step2"),
-          step3: document.getElementById("step3")
-        };
-
-        // 更新步骤状态
-        function updateStep(step) {
-          state.step = step;
-          var stepElements = [elements.step1, elements.step2, elements.step3];
-          for (var i = 0; i < stepElements.length; i++) {
-            var el = stepElements[i];
-            el.classList.remove("active", "completed");
-            if (i + 1 < step) {
-              el.classList.add("completed");
-            } else if (i + 1 === step) {
-              el.classList.add("active");
-            }
-          }
-        }
-
-        // 更新状态显示
-        function updateStatus(type, icon, text) {
-          elements.status.className = "status " + type;
-          elements.statusIcon.textContent = icon;
-          elements.statusText.textContent = text;
-        }
-
-        // 倒计时
-        function startCountdown() {
-          elements.timer.classList.remove("hidden");
-          var interval = setInterval(function() {
-            var remaining = state.expiresAt - Date.now();
-            if (remaining <= 0) {
-              clearInterval(interval);
-              updateStatus("error", "⚠️", "验证码已过期，请刷新页面重新获取");
-              elements.openGitHub.style.pointerEvents = "none";
-              elements.openGitHub.style.opacity = "0.6";
-              elements.confirmBtn.disabled = true;
-              return;
-            }
-            var minutes = Math.floor(remaining / 60000);
-            var seconds = Math.floor((remaining % 60000) / 1000);
-            var minStr = minutes < 10 ? "0" + minutes : "" + minutes;
-            var secStr = seconds < 10 ? "0" + seconds : "" + seconds;
-            elements.countdown.textContent = minStr + ":" + secStr;
-          }, 1000);
-        }
-
-        // 点击前往 GitHub 验证（<a> 标签会自动打开链接）
-        elements.openGitHub.addEventListener("click", function(e) {
-          // 更新状态
-          state.githubOpened = true;
-          updateStep(2);
-          updateStatus("processing", "🔗", "已打开 GitHub 验证页面，请在新窗口中完成授权");
-
-          // 显示确认按钮
-          elements.confirmBtn.classList.remove("hidden");
-
-          // 修改链接文字
-          elements.openGitHub.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M3.75 2h3.5a.75.75 0 0 1 0 1.5h-3.5a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25v-3.5a.75.75 0 0 1 1.5 0v3.5A1.75 1.75 0 0 1 12.25 14h-8.5A1.75 1.75 0 0 1 2 12.25v-8.5C2 2.784 2.784 2 3.75 2Zm6.854-1h4.146a.25.25 0 0 1 .25.25v4.146a.25.25 0 0 1-.427.177L13.03 4.03 9.28 7.78a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042l3.75-3.75-1.543-1.543A.25.25 0 0 1 10.604 1Z"/></svg> 重新打开验证页面';
-
-          // 启动倒计时
-          if (!state.countdownStarted) {
-            state.countdownStarted = true;
-            startCountdown();
-          }
-        }, false);
-
-        // 点击确认验证
-        elements.confirmBtn.addEventListener("click", function(e) {
-          e.preventDefault();
-
-          if (state.verifying) return;
-          state.verifying = true;
-
-          updateStep(3);
-          updateStatus("processing", "⏳", "正在验证授权状态...");
-          elements.confirmBtn.classList.add("btn-loading");
-          elements.confirmBtn.disabled = true;
-
-          // 发送确认请求 - 使用 XMLHttpRequest 确保兼容性
-          var xhr = new XMLHttpRequest();
-          xhr.open("POST", "/auth/confirm/{{ device_code }}", true);
-          xhr.setRequestHeader("Content-Type", "application/json");
-
-          xhr.onreadystatechange = function() {
-            if (xhr.readyState === 4) {
-              if (xhr.status === 200) {
-                try {
-                  var data = JSON.parse(xhr.responseText);
-                  if (data.success) {
-                    elements.step3.classList.remove("active");
-                    elements.step3.classList.add("completed");
-                    elements.confirmBtn.classList.remove("btn-loading", "btn-confirm");
-                    elements.confirmBtn.classList.add("btn-primary");
-                    elements.confirmBtn.innerHTML = "✓ 认证完成";
-                    elements.openGitHub.classList.add("hidden");
-                    elements.timer.classList.add("hidden");
-                    updateStatus("success", "✅", "认证成功！您可以安全关闭此页面了");
-                  } else {
-                    handleError(data.error || "未知错误");
-                  }
-                } catch (parseError) {
-                  handleError("响应解析失败");
-                }
-              } else {
-                handleError("请求失败，状态码: " + xhr.status);
-              }
-            }
-          };
-
-          xhr.onerror = function() {
-            handleError("网络请求失败");
-          };
-
-          xhr.send();
-        }, false);
-
-        // 错误处理
-        function handleError(message) {
-          state.verifying = false;
-          elements.confirmBtn.classList.remove("btn-loading");
-          elements.confirmBtn.disabled = false;
-
-          // 判断是否是"尚未授权"的情况
-          if (message.indexOf("authorization_pending") !== -1 || message.indexOf("等待") !== -1) {
-            updateStatus("processing", "⏳", "您似乎尚未在 GitHub 完成授权，请先完成授权后再点击确认");
-            updateStep(2);
-          } else if (message.indexOf("expired") !== -1 || message.indexOf("过期") !== -1) {
-            updateStatus("error", "⚠️", "验证码已过期，请刷新页面重新获取");
-            elements.openGitHub.style.pointerEvents = "none";
-            elements.openGitHub.style.opacity = "0.6";
-            elements.confirmBtn.disabled = true;
-          } else {
-            updateStatus("error", "❌", "验证失败：" + message + "，请重试");
-          }
-        }
-      })();
-    </script>
   </body>
 </html>
