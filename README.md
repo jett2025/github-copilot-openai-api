@@ -15,6 +15,155 @@
 
 ---
 
+## 📐 架构概览
+
+```mermaid
+flowchart TB
+    subgraph 客户端
+        A1[OpenAI 客户端<br/>Cherry Studio / Cursor]
+        A2[Claude 客户端<br/>Claude Code]
+        A3[其他客户端]
+    end
+
+    subgraph 本服务
+        subgraph 路由层
+            R1["/v1/chat/completions"]
+            R2["/v1/messages"]
+            R3["/v1/responses"]
+            R4["/v1/models"]
+            R5["/auth/device"]
+        end
+
+        subgraph 中间件
+            M1[API 认证中间件]
+        end
+
+        subgraph 服务层
+            S1[消息格式转换服务]
+            S2[ChatAPI 客户端]
+        end
+
+        subgraph 认证模块
+            AUTH1[EnvsAuth<br/>环境变量]
+            AUTH2[HostsAuth<br/>hosts.json]
+            AUTH3[DeviceAuth<br/>设备授权]
+        end
+    end
+
+    subgraph GitHub Copilot API
+        GH1["/chat/completions"]
+        GH2["/responses"]
+        GH3["Token API"]
+    end
+
+    A1 --> R1
+    A2 --> R2
+    A3 --> R3
+
+    R1 --> M1
+    R2 --> M1
+    R3 --> M1
+
+    M1 --> S1
+    S1 --> S2
+
+    S2 --> AUTH1
+    S2 --> AUTH2
+    S2 --> AUTH3
+
+    AUTH1 -.-> GH3
+    AUTH2 -.-> GH3
+    AUTH3 --> R5
+    R5 -.-> GH3
+
+    S2 --> GH1
+    S2 --> GH2
+```
+
+### 请求处理流程
+
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant Server as FastAPI 服务
+    participant Auth as 认证模块
+    participant Converter as 消息转换器
+    participant ChatAPI as ChatAPI
+    participant Copilot as GitHub Copilot API
+
+    Client->>Server: POST /v1/chat/completions
+    Server->>Auth: 验证 API Key
+
+    alt API Key 无效
+        Auth-->>Server: 401 Unauthorized
+        Server-->>Client: 认证失败
+    end
+
+    Server->>Auth: 获取 Copilot Token
+
+    alt Token 不存在
+        Auth->>Auth: 尝试多种认证方式
+        Note over Auth: EnvsAuth → HostsAuth → DeviceAuth
+    end
+
+    Auth-->>Server: 返回 Token
+    Server->>Converter: 规范化消息格式
+    Converter-->>Server: 处理后的消息
+
+    Server->>ChatAPI: 调用 Copilot API
+    ChatAPI->>Copilot: 请求 /chat/completions
+
+    alt 流式响应
+        loop SSE 流
+            Copilot-->>ChatAPI: data: {...}
+            ChatAPI-->>Server: 转换格式
+            Server-->>Client: data: {...}
+        end
+        Copilot-->>ChatAPI: data: [DONE]
+        Server-->>Client: data: [DONE]
+    else 非流式响应
+        Copilot-->>ChatAPI: JSON 响应
+        ChatAPI-->>Server: 转换格式
+        Server-->>Client: JSON 响应
+    end
+```
+
+---
+
+## 📁 项目结构
+
+```
+github-copilot-openai-api/
+├── server.py              # 应用入口
+├── config.py              # 统一配置管理
+├── exceptions.py          # 自定义异常类
+├── api/
+│   ├── chat_api.py        # Copilot API 客户端
+│   └── chat_stream.py     # 流式/非流式处理入口
+├── auth/
+│   ├── __init__.py        # Auth 基类
+│   ├── envs_auth.py       # 环境变量认证
+│   ├── hosts_auth.py      # hosts.json 文件认证
+│   └── device_auth.py     # 设备授权认证
+├── middleware/
+│   └── auth.py            # API 认证中间件
+├── routes/
+│   ├── auth.py            # /auth/* 路由
+│   ├── chat.py            # /v1/chat/completions 路由
+│   ├── claude.py          # /v1/messages 路由
+│   ├── responses.py       # /v1/responses 路由
+│   └── models.py          # /v1/models 路由
+├── services/
+│   └── message_converter.py  # OpenAI/Claude 消息格式转换
+├── templates/
+│   └── auth.html          # 设备认证页面
+├── Dockerfile
+├── docker-compose.yml
+└── pyproject.toml
+```
+
+---
+
 ## 🚀 快速开始 (Docker Compose)
 
 1. **克隆并准备代码**：
