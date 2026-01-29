@@ -86,16 +86,10 @@
 
         <!-- 设备码显示 -->
         <div
-          class="bg-github-bg p-6 rounded-md border border-github-border font-mono text-3xl text-center text-white tracking-widest mb-2 select-all cursor-pointer hover:border-github-primary transition-colors"
-          @click="copyCode"
-          :title="copied ? '已复制!' : '点击复制'"
+          class="bg-github-bg p-6 rounded-md border border-github-border font-mono text-3xl text-center text-white tracking-widest mb-6"
         >
           {{ userCode }}
         </div>
-        <p class="text-xs text-github-muted text-center mb-6">
-          <i class="fa-regular fa-copy mr-1"></i>
-          点击上方设备码可复制
-        </p>
 
         <!-- 按钮组 -->
         <div class="flex flex-col gap-3">
@@ -178,7 +172,6 @@
           const isVerifying = ref(false);
           const isSuccess = ref(false);
           const isExpired = ref(false);
-          const copied = ref(false);
           const countdownStarted = ref(false);
           const remainingSeconds = ref(15 * 60);
           const statusType = ref('waiting');
@@ -216,24 +209,6 @@
           const statusText = computed(() => statusMessage.value);
 
           // 方法
-          const copyCode = async () => {
-            try {
-              await navigator.clipboard.writeText(userCode.value);
-              copied.value = true;
-              setTimeout(() => { copied.value = false; }, 2000);
-            } catch (err) {
-              // 回退方案
-              const textarea = document.createElement('textarea');
-              textarea.value = userCode.value;
-              document.body.appendChild(textarea);
-              textarea.select();
-              document.execCommand('copy');
-              document.body.removeChild(textarea);
-              copied.value = true;
-              setTimeout(() => { copied.value = false; }, 2000);
-            }
-          };
-
           const startCountdown = () => {
             if (countdownInterval) return;
             countdownStarted.value = true;
@@ -323,13 +298,11 @@
             isVerifying,
             isSuccess,
             isExpired,
-            copied,
             countdownStarted,
             countdownDisplay,
             statusClass,
             statusIcon,
             statusText,
-            copyCode,
             onOpenGitHub,
             onConfirm
           };
