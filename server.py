@@ -18,6 +18,7 @@ from routes import (
     claude_router,
     responses_router,
     models_router,
+    usage_router,
 )
 
 # 创建 FastAPI 应用
@@ -42,6 +43,7 @@ app.include_router(chat_router)
 app.include_router(claude_router)
 app.include_router(responses_router)
 app.include_router(models_router)
+app.include_router(usage_router)
 
 
 @app.get("/")
