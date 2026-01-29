@@ -45,6 +45,7 @@
     </style>
   </head>
   <body class="bg-github-bg text-github-text min-h-screen flex items-center justify-center font-sans">
+    {% raw %}
     <div id="app" v-cloak>
       <div class="w-[90%] max-w-[500px] p-8 bg-github-card rounded-md border border-github-border shadow-lg mx-auto">
         <!-- GitHub Logo -->
@@ -148,6 +149,7 @@
         </div>
       </div>
     </div>
+    {% endraw %}
 
     <script>
       const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
