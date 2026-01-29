@@ -5,6 +5,7 @@ GitHub Copilot Chat API 客户端
 """
 
 from typing import List, Dict, Any, AsyncGenerator
+import asyncio
 import time
 import json
 import aiohttp
@@ -16,13 +17,31 @@ from services.message_converter import (
     convert_openai_to_responses_format,
     convert_tools_for_responses,
 )
+from utils.retry import RetryConfig, calculate_backoff_delay
 
 
 class ChatAPI:
     """聊天 API 实现"""
 
+    # 默认重试配置
+    DEFAULT_RETRY_CONFIG = RetryConfig(
+        max_retries=3,
+        base_delay=1.0,
+        max_delay=30.0,
+        exponential_base=2.0,
+    )
+
     def __init__(self, token: str):
         self.token = token
+        self.retry_config = self.DEFAULT_RETRY_CONFIG
+
+    def _is_retryable_status(self, status: int) -> bool:
+        """检查 HTTP 状态码是否可重试"""
+        return status in self.retry_config.retryable_status_codes
+
+    def _is_retryable_exception(self, e: Exception) -> bool:
+        """检查异常是否可重试"""
+        return isinstance(e, self.retry_config.retryable_exceptions)
 
     def _build_base_headers(self, copilot_token: str, accept: str = "application/json") -> Dict[str, str]:
         """
@@ -103,7 +122,7 @@ class ChatAPI:
             temperature: float = 0.7,
             **kwargs
     ) -> AsyncGenerator[str, None]:
-        """将 GitHub Copilot API 转换为 OpenAI API 兼容的流式聊天接口"""
+        """将 GitHub Copilot API 转换为 OpenAI API 兼容的流式聊天接口（带重试）"""
         copilot_token = await self.get_copilot_token()
         if not copilot_token:
             raise ValueError("No Copilot token")
@@ -118,76 +137,115 @@ class ChatAPI:
 
         logger.debug(f"Chat API stream request: model={model}, messages_count={len(messages)}, tools_count={len(kwargs.get('tools', []))}")
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                    url=copilot_config.chat_completions_url,
-                    headers=headers,
-                    json=payload
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(f"Chat API error: model={model}, status={response.status}, error={error_text}")
-                    for i, msg in enumerate(messages):
-                        msg_info = f"msg[{i}]: role={msg.get('role')}, has_content={msg.get('content') is not None}, has_tool_calls={'tool_calls' in msg}"
-                        logger.debug(msg_info)
-                    raise ValueError(f"status code：{response.status}，error message：{error_text}")
+        last_exception = None
+        for attempt in range(self.retry_config.max_retries + 1):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                            url=copilot_config.chat_completions_url,
+                            headers=headers,
+                            json=payload
+                    ) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            # 检查是否可重试的状态码
+                            if self._is_retryable_status(response.status) and attempt < self.retry_config.max_retries:
+                                delay = calculate_backoff_delay(
+                                    attempt,
+                                    self.retry_config.base_delay,
+                                    self.retry_config.max_delay,
+                                    self.retry_config.exponential_base,
+                                )
+                                logger.warning(
+                                    f"Chat API error (attempt {attempt + 1}/{self.retry_config.max_retries + 1}): "
+                                    f"status={response.status}. Retrying in {delay:.1f}s..."
+                                )
+                                await asyncio.sleep(delay)
+                                continue
 
-                async for line in response.content:
-                    try:
-                        line = line.decode('utf-8').strip()
-                        if not line:
-                            continue
+                            logger.error(f"Chat API error: model={model}, status={response.status}, error={error_text}")
+                            for i, msg in enumerate(messages):
+                                msg_info = f"msg[{i}]: role={msg.get('role')}, has_content={msg.get('content') is not None}, has_tool_calls={'tool_calls' in msg}"
+                                logger.debug(msg_info)
+                            raise ValueError(f"status code：{response.status}，error message：{error_text}")
 
-                        if line.startswith('data: '):
-                            data = line[6:].strip()
-                        else:
-                            data = line.strip()
+                        # 成功连接，开始处理流式响应
+                        async for line in response.content:
+                            try:
+                                line = line.decode('utf-8').strip()
+                                if not line:
+                                    continue
 
-                        if data == '[DONE]':
-                            yield 'data: [DONE]\n\n'
-                            break
+                                if line.startswith('data: '):
+                                    data = line[6:].strip()
+                                else:
+                                    data = line.strip()
 
-                        try:
-                            chunk = json.loads(data)
-                        except json.JSONDecodeError:
-                            continue
+                                if data == '[DONE]':
+                                    yield 'data: [DONE]\n\n'
+                                    return  # 使用 return 退出生成器
 
-                        if not chunk.get('choices'):
-                            continue
+                                try:
+                                    chunk = json.loads(data)
+                                except json.JSONDecodeError:
+                                    continue
 
-                        delta = chunk['choices'][0].get('delta', {})
-                        content = delta.get('content')
-                        tool_calls = delta.get('tool_calls')
-                        reasoning_content = delta.get('reasoning_content')
+                                if not chunk.get('choices'):
+                                    continue
 
-                        if not any([content is not None, tool_calls is not None, reasoning_content is not None]):
-                            continue
+                                delta = chunk['choices'][0].get('delta', {})
+                                content = delta.get('content')
+                                tool_calls = delta.get('tool_calls')
+                                reasoning_content = delta.get('reasoning_content')
 
-                        response_delta = {}
-                        if content is not None:
-                            response_delta['content'] = content
-                        if tool_calls is not None:
-                            response_delta['tool_calls'] = tool_calls
-                        if reasoning_content is not None:
-                            response_delta['reasoning_content'] = reasoning_content
+                                if not any([content is not None, tool_calls is not None, reasoning_content is not None]):
+                                    continue
 
-                        response_chunk = {
-                            'id': f"chatcmpl-{int(time.time() * 1000)}",
-                            'object': 'chat.completion.chunk',
-                            'created': int(time.time()),
-                            'model': model,
-                            'choices': [
-                                {
-                                    'index': 0,
-                                    'delta': response_delta,
-                                    'finish_reason': chunk['choices'][0].get('finish_reason')
+                                response_delta = {}
+                                if content is not None:
+                                    response_delta['content'] = content
+                                if tool_calls is not None:
+                                    response_delta['tool_calls'] = tool_calls
+                                if reasoning_content is not None:
+                                    response_delta['reasoning_content'] = reasoning_content
+
+                                response_chunk = {
+                                    'id': f"chatcmpl-{int(time.time() * 1000)}",
+                                    'object': 'chat.completion.chunk',
+                                    'created': int(time.time()),
+                                    'model': model,
+                                    'choices': [
+                                        {
+                                            'index': 0,
+                                            'delta': response_delta,
+                                            'finish_reason': chunk['choices'][0].get('finish_reason')
+                                        }
+                                    ]
                                 }
-                            ]
-                        }
-                        yield f"data: {json.dumps(response_chunk)}\n\n"
+                                yield f"data: {json.dumps(response_chunk)}\n\n"
 
-                    except Exception:
-                        continue
+                            except Exception:
+                                continue
+                        # 流式响应处理完成，正常退出
+                        return
+
+            except self.retry_config.retryable_exceptions as e:
+                last_exception = e
+                if attempt < self.retry_config.max_retries:
+                    delay = calculate_backoff_delay(
+                        attempt,
+                        self.retry_config.base_delay,
+                        self.retry_config.max_delay,
+                        self.retry_config.exponential_base,
+                    )
+                    logger.warning(
+                        f"Chat API network error (attempt {attempt + 1}/{self.retry_config.max_retries + 1}): "
+                        f"{type(e).__name__}: {e}. Retrying in {delay:.1f}s..."
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Chat API failed after {self.retry_config.max_retries + 1} attempts: {e}")
+                    raise
 
     @async_lru.alru_cache(ttl=2 * 60 * 60)
     async def get_copilot_token(self) -> str:
@@ -220,7 +278,7 @@ class ChatAPI:
             temperature: float = 0.7,
             **kwargs
     ) -> Dict[str, Any]:
-        """非流式聊天接口，返回完整的响应"""
+        """非流式聊天接口，返回完整的响应（带重试）"""
         copilot_token = await self.get_copilot_token()
         if not copilot_token:
             raise ValueError("No Copilot token")
@@ -235,40 +293,81 @@ class ChatAPI:
 
         logger.debug(f"Chat API payload: model={model}, tools_count={len(kwargs.get('tools', []))}")
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                    url=copilot_config.chat_completions_url,
-                    headers=headers,
-                    json=payload
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(f"Chat API error: model={model}, status={response.status}, payload_keys={list(payload.keys())}")
-                    raise ValueError(f"status code：{response.status}，error message：{error_text}")
+        last_exception = None
+        for attempt in range(self.retry_config.max_retries + 1):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                            url=copilot_config.chat_completions_url,
+                            headers=headers,
+                            json=payload
+                    ) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            # 检查是否可重试的状态码
+                            if self._is_retryable_status(response.status) and attempt < self.retry_config.max_retries:
+                                delay = calculate_backoff_delay(
+                                    attempt,
+                                    self.retry_config.base_delay,
+                                    self.retry_config.max_delay,
+                                    self.retry_config.exponential_base,
+                                )
+                                logger.warning(
+                                    f"Chat API error (attempt {attempt + 1}/{self.retry_config.max_retries + 1}): "
+                                    f"status={response.status}. Retrying in {delay:.1f}s..."
+                                )
+                                await asyncio.sleep(delay)
+                                continue
 
-                response_data = await response.json()
-                choice = response_data.get("choices", [{}])[0]
-                message = choice.get("message", {})
+                            logger.error(f"Chat API error: model={model}, status={response.status}, payload_keys={list(payload.keys())}")
+                            raise ValueError(f"status code：{response.status}，error message：{error_text}")
 
-                return {
-                    "id": f"chatcmpl-{int(time.time() * 1000)}",
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "model": model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {
-                                "role": "assistant",
-                                "content": message.get("content"),
-                                "tool_calls": message.get("tool_calls"),
-                                "reasoning_content": message.get("reasoning_content")
-                            },
-                            "finish_reason": choice.get("finish_reason", "stop")
+                        response_data = await response.json()
+                        choice = response_data.get("choices", [{}])[0]
+                        message = choice.get("message", {})
+
+                        return {
+                            "id": f"chatcmpl-{int(time.time() * 1000)}",
+                            "object": "chat.completion",
+                            "created": int(time.time()),
+                            "model": model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": message.get("content"),
+                                        "tool_calls": message.get("tool_calls"),
+                                        "reasoning_content": message.get("reasoning_content")
+                                    },
+                                    "finish_reason": choice.get("finish_reason", "stop")
+                                }
+                            ],
+                            "usage": response_data.get("usage", {})
                         }
-                    ],
-                    "usage": response_data.get("usage", {})
-                }
+
+            except self.retry_config.retryable_exceptions as e:
+                last_exception = e
+                if attempt < self.retry_config.max_retries:
+                    delay = calculate_backoff_delay(
+                        attempt,
+                        self.retry_config.base_delay,
+                        self.retry_config.max_delay,
+                        self.retry_config.exponential_base,
+                    )
+                    logger.warning(
+                        f"Chat API network error (attempt {attempt + 1}/{self.retry_config.max_retries + 1}): "
+                        f"{type(e).__name__}: {e}. Retrying in {delay:.1f}s..."
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Chat API failed after {self.retry_config.max_retries + 1} attempts: {e}")
+                    raise
+
+        # 如果所有重试都失败了
+        if last_exception:
+            raise last_exception
+        raise ValueError("Unexpected error: all retries exhausted")
 
     # ==================== Responses API 方法 ====================
 
@@ -279,7 +378,7 @@ class ChatAPI:
             temperature: float = 0.7,
             **kwargs
     ) -> AsyncGenerator[str, None]:
-        """使用 /responses API 的流式聊天接口，输出转换为 Chat Completions 格式"""
+        """使用 /responses API 的流式聊天接口，输出转换为 Chat Completions 格式（带重试）"""
         copilot_token = await self.get_copilot_token()
         if not copilot_token:
             raise ValueError("No Copilot token")
@@ -318,72 +417,107 @@ class ChatAPI:
         connector = aiohttp.TCPConnector(limit=100)
         timeout = aiohttp.ClientTimeout(total=300)
 
-        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-            async with session.post(
-                    url=copilot_config.responses_url,
-                    headers=headers,
-                    json=payload
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise ValueError(f"Responses API error, status: {response.status}, message: {error_text}")
-
-                buffer = ""
-                async for chunk in response.content.iter_any():
-                    try:
-                        buffer += chunk.decode('utf-8')
-
-                        while '\n' in buffer:
-                            line, buffer = buffer.split('\n', 1)
-                            line = line.strip()
-                            if not line:
+        for attempt in range(self.retry_config.max_retries + 1):
+            try:
+                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                    async with session.post(
+                            url=copilot_config.responses_url,
+                            headers=headers,
+                            json=payload
+                    ) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            # 检查是否可重试的状态码
+                            if self._is_retryable_status(response.status) and attempt < self.retry_config.max_retries:
+                                delay = calculate_backoff_delay(
+                                    attempt,
+                                    self.retry_config.base_delay,
+                                    self.retry_config.max_delay,
+                                    self.retry_config.exponential_base,
+                                )
+                                logger.warning(
+                                    f"Responses API error (attempt {attempt + 1}/{self.retry_config.max_retries + 1}): "
+                                    f"status={response.status}. Retrying in {delay:.1f}s..."
+                                )
+                                await asyncio.sleep(delay)
                                 continue
+                            raise ValueError(f"Responses API error, status: {response.status}, message: {error_text}")
 
-                            if line.startswith('data: '):
-                                data = line[6:].strip()
-                            else:
-                                data = line.strip()
-
-                            if data == '[DONE]':
-                                yield 'data: [DONE]\n\n'
-                                return
-
+                        buffer = ""
+                        async for chunk in response.content.iter_any():
                             try:
-                                chunk_json = json.loads(data)
-                            except json.JSONDecodeError:
-                                continue
+                                buffer += chunk.decode('utf-8')
 
-                            extracted = self._extract_responses_content(chunk_json)
-                            if extracted is None:
-                                continue
+                                while '\n' in buffer:
+                                    line, buffer = buffer.split('\n', 1)
+                                    line = line.strip()
+                                    if not line:
+                                        continue
 
-                            response_delta = {}
-                            if "content" in extracted:
-                                response_delta["content"] = extracted["content"]
-                            if "tool_calls" in extracted:
-                                response_delta["tool_calls"] = extracted["tool_calls"]
+                                    if line.startswith('data: '):
+                                        data = line[6:].strip()
+                                    else:
+                                        data = line.strip()
 
-                            if not response_delta:
-                                continue
+                                    if data == '[DONE]':
+                                        yield 'data: [DONE]\n\n'
+                                        return
 
-                            response_chunk = {
-                                'id': f"chatcmpl-{int(time.time() * 1000)}",
-                                'object': 'chat.completion.chunk',
-                                'created': int(time.time()),
-                                'model': model,
-                                'choices': [
-                                    {
-                                        'index': 0,
-                                        'delta': response_delta,
-                                        'finish_reason': None
+                                    try:
+                                        chunk_json = json.loads(data)
+                                    except json.JSONDecodeError:
+                                        continue
+
+                                    extracted = self._extract_responses_content(chunk_json)
+                                    if extracted is None:
+                                        continue
+
+                                    response_delta = {}
+                                    if "content" in extracted:
+                                        response_delta["content"] = extracted["content"]
+                                    if "tool_calls" in extracted:
+                                        response_delta["tool_calls"] = extracted["tool_calls"]
+
+                                    if not response_delta:
+                                        continue
+
+                                    response_chunk = {
+                                        'id': f"chatcmpl-{int(time.time() * 1000)}",
+                                        'object': 'chat.completion.chunk',
+                                        'created': int(time.time()),
+                                        'model': model,
+                                        'choices': [
+                                            {
+                                                'index': 0,
+                                                'delta': response_delta,
+                                                'finish_reason': None
+                                            }
+                                        ]
                                     }
-                                ]
-                            }
-                            yield f"data: {json.dumps(response_chunk)}\n\n"
+                                    yield f"data: {json.dumps(response_chunk)}\n\n"
 
-                    except Exception as e:
-                        logger.debug(f"Responses stream parse error: {e}")
-                        continue
+                            except Exception as e:
+                                logger.debug(f"Responses stream parse error: {e}")
+                                continue
+                        # 流式响应处理完成
+                        return
+
+            except self.retry_config.retryable_exceptions as e:
+                if attempt < self.retry_config.max_retries:
+                    delay = calculate_backoff_delay(
+                        attempt,
+                        self.retry_config.base_delay,
+                        self.retry_config.max_delay,
+                        self.retry_config.exponential_base,
+                    )
+                    logger.warning(
+                        f"Responses API network error (attempt {attempt + 1}/{self.retry_config.max_retries + 1}): "
+                        f"{type(e).__name__}: {e}. Retrying in {delay:.1f}s..."
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Responses API failed after {self.retry_config.max_retries + 1} attempts: {e}")
+                    raise
 
     def _extract_responses_content(self, chunk: Dict[str, Any]) -> Dict[str, Any] | None:
         """从 Responses API 的流式 chunk 中提取内容"""
@@ -445,7 +579,7 @@ class ChatAPI:
             temperature: float = 0.7,
             **kwargs
     ) -> Dict[str, Any]:
-        """使用 /responses API 的非流式聊天接口，输出转换为 Chat Completions 格式"""
+        """使用 /responses API 的非流式聊天接口，输出转换为 Chat Completions 格式（带重试）"""
         copilot_token = await self.get_copilot_token()
         if not copilot_token:
             raise ValueError("No Copilot token")
@@ -480,44 +614,84 @@ class ChatAPI:
 
         logger.debug(f"Responses API payload: {json.dumps(payload, ensure_ascii=False)}")
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                    url=copilot_config.responses_url,
-                    headers=headers,
-                    json=payload
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise ValueError(f"Responses API error, status: {response.status}, message: {error_text}")
+        last_exception = None
+        for attempt in range(self.retry_config.max_retries + 1):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                            url=copilot_config.responses_url,
+                            headers=headers,
+                            json=payload
+                    ) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            # 检查是否可重试的状态码
+                            if self._is_retryable_status(response.status) and attempt < self.retry_config.max_retries:
+                                delay = calculate_backoff_delay(
+                                    attempt,
+                                    self.retry_config.base_delay,
+                                    self.retry_config.max_delay,
+                                    self.retry_config.exponential_base,
+                                )
+                                logger.warning(
+                                    f"Responses API error (attempt {attempt + 1}/{self.retry_config.max_retries + 1}): "
+                                    f"status={response.status}. Retrying in {delay:.1f}s..."
+                                )
+                                await asyncio.sleep(delay)
+                                continue
+                            raise ValueError(f"Responses API error, status: {response.status}, message: {error_text}")
 
-                response_data = await response.json()
-                logger.debug(f"Responses API response: {json.dumps(response_data, ensure_ascii=False)}")
+                        response_data = await response.json()
+                        logger.debug(f"Responses API response: {json.dumps(response_data, ensure_ascii=False)}")
 
-                extracted = self._extract_responses_full_content(response_data)
+                        extracted = self._extract_responses_full_content(response_data)
 
-                message = {
-                    "role": "assistant",
-                    "content": extracted["content"],
-                }
-                if extracted["tool_calls"]:
-                    message["tool_calls"] = extracted["tool_calls"]
-
-                finish_reason = "tool_calls" if extracted["tool_calls"] else "stop"
-
-                return {
-                    "id": f"chatcmpl-{int(time.time() * 1000)}",
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "model": model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": message,
-                            "finish_reason": finish_reason
+                        message = {
+                            "role": "assistant",
+                            "content": extracted["content"],
                         }
-                    ],
-                    "usage": response_data.get("usage", {})
-                }
+                        if extracted["tool_calls"]:
+                            message["tool_calls"] = extracted["tool_calls"]
+
+                        finish_reason = "tool_calls" if extracted["tool_calls"] else "stop"
+
+                        return {
+                            "id": f"chatcmpl-{int(time.time() * 1000)}",
+                            "object": "chat.completion",
+                            "created": int(time.time()),
+                            "model": model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "message": message,
+                                    "finish_reason": finish_reason
+                                }
+                            ],
+                            "usage": response_data.get("usage", {})
+                        }
+
+            except self.retry_config.retryable_exceptions as e:
+                last_exception = e
+                if attempt < self.retry_config.max_retries:
+                    delay = calculate_backoff_delay(
+                        attempt,
+                        self.retry_config.base_delay,
+                        self.retry_config.max_delay,
+                        self.retry_config.exponential_base,
+                    )
+                    logger.warning(
+                        f"Responses API network error (attempt {attempt + 1}/{self.retry_config.max_retries + 1}): "
+                        f"{type(e).__name__}: {e}. Retrying in {delay:.1f}s..."
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Responses API failed after {self.retry_config.max_retries + 1} attempts: {e}")
+                    raise
+
+        # 如果所有重试都失败了
+        if last_exception:
+            raise last_exception
+        raise ValueError("Unexpected error: all retries exhausted")
 
     def _extract_responses_full_content(self, response_data: Dict[str, Any]) -> Dict[str, Any]:
         """从 Responses API 的完整响应中提取内容"""

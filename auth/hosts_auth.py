@@ -41,9 +41,21 @@ class HostsAuth(Auth):
         """
         获取 hosts.json 文件路径
 
+        优先使用 /app/auth_data 目录（Docker 持久化卷），
+        如果不存在则使用系统默认配置目录。
+
         Returns:
             hosts.json 文件的完整路径
         """
+        # Docker 环境：优先使用挂载的持久化卷
+        docker_auth_dir = "/app/auth_data"
+        if os.path.exists(docker_auth_dir) or os.path.exists("/app"):
+            # 在 Docker 容器中运行
+            if not os.path.exists(docker_auth_dir):
+                os.makedirs(docker_auth_dir, exist_ok=True)
+            return os.path.join(docker_auth_dir, "hosts.json")
+
+        # 本地开发环境
         if os.name == "nt":  # Windows
             config_dir = os.path.expandvars(r"%LOCALAPPDATA%\github-copilot")
             if not os.path.exists(config_dir):

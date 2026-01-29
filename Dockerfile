@@ -24,6 +24,7 @@ COPY middleware/ ./middleware/
 COPY routes/ ./routes/
 COPY services/ ./services/
 COPY templates/ ./templates/
+COPY utils/ ./utils/
 COPY config.py ./
 COPY exceptions.py ./
 COPY server.py ./
