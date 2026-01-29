@@ -16,8 +16,8 @@ from middleware.auth import require_api_key
 router = APIRouter(prefix="/v1", tags=["chat"])
 
 
-@router.post("/chat/completions")
-async def chat_completions(request: Request, _: None = Depends(require_api_key)) -> StreamingResponse | JSONResponse:
+@router.post("/chat/completions", response_model=None)
+async def chat_completions(request: Request, _: None = Depends(require_api_key)):
     """处理聊天完成请求，支持 OpenAI API 兼容的流式输出"""
     try:
         logger.debug(

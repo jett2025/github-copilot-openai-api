@@ -22,8 +22,8 @@ from services.message_converter import (
 router = APIRouter(prefix="/v1", tags=["claude"])
 
 
-@router.post("/messages")
-async def claude_messages(request: Request, _: None = Depends(require_api_key)) -> StreamingResponse | JSONResponse:
+@router.post("/messages", response_model=None)
+async def claude_messages(request: Request, _: None = Depends(require_api_key)):
     """处理 Claude API 兼容的消息请求"""
     try:
         # 解析 Claude 请求

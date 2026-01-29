@@ -16,8 +16,8 @@ from middleware.auth import require_api_key
 router = APIRouter(prefix="/v1", tags=["responses"])
 
 
-@router.post("/responses")
-async def responses_api(request: Request, _: None = Depends(require_api_key)) -> StreamingResponse | JSONResponse:
+@router.post("/responses", response_model=None)
+async def responses_api(request: Request, _: None = Depends(require_api_key)):
     """处理 OpenAI Responses API 请求，转发到 /chat/completions 处理"""
     try:
         data = await request.json()
