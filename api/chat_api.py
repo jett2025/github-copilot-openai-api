@@ -130,18 +130,11 @@ class ChatAPI:
             "stream": stream,
         }
 
-        # Gemini 模型通过 GitHub Copilot API 可能不支持 tools
-        # 其他模型正常传递 tools 参数
-        model_lower = model.lower()
-        is_gemini = "gemini" in model_lower
-
-        if is_gemini and "tools" in kwargs:
-            logger.warning(f"Model {model} may not support tools via Copilot API, skipping tools parameter")
-        else:
-            if "tools" in kwargs:
-                payload["tools"] = kwargs["tools"]
-            if "tool_choice" in kwargs:
-                payload["tool_choice"] = kwargs["tool_choice"]
+        if "tools" in kwargs:
+            payload["tools"] = kwargs["tools"]
+            logger.debug(f"Tools count: {len(kwargs['tools'])}")
+        if "tool_choice" in kwargs:
+            payload["tool_choice"] = kwargs["tool_choice"]
 
         return payload
 
@@ -384,7 +377,8 @@ class ChatAPI:
                                 await asyncio.sleep(delay)
                                 continue
 
-                            logger.error(f"Chat API error: model={model}, status={response.status}, payload_keys={list(payload.keys())}")
+                            logger.error(f"Chat API error: model={model}, status={response.status}, payload_keys={list(payload.keys())}, tools_count={len(payload.get('tools', []))}")
+                            logger.error(f"Error response: {error_text[:500]}")
                             raise ValueError(f"status code：{response.status}，error message：{error_text}")
 
                         response_data = await response.json()
