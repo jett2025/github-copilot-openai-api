@@ -67,6 +67,12 @@ async def root():
     return RedirectResponse(url="/auth/device")
 
 
+@app.get("/health")
+async def health():
+    """健康检查端点（无需认证）"""
+    return {"status": "ok"}
+
+
 if __name__ == "__main__":
     host = server_config.host
     port = server_config.port

@@ -4,23 +4,23 @@ Models 路由
 处理模型列表请求，动态从 GitHub Copilot API 获取可用模型。
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from loguru import logger
 
 from api.chat_stream import get_models
 from config import SUPPORTED_MODELS
-from middleware.auth import require_api_key
 
 router = APIRouter(prefix="/v1", tags=["models"])
 
 
 @router.get("/models")
-async def models(_: None = Depends(require_api_key)) -> JSONResponse:
+async def models() -> JSONResponse:
     """
     返回支持的模型列表
 
     优先从 GitHub Copilot API 动态获取，如果失败则回退到静态列表。
+    注意：此端点不需要认证，用于健康检查和客户端模型发现。
     """
     try:
         # 动态获取模型列表
