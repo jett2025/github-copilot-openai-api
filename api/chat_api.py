@@ -12,7 +12,7 @@ import aiohttp
 import async_lru
 from loguru import logger
 
-from config import copilot_config, is_responses_model
+from config import copilot_config, is_responses_model, is_tools_supported
 from services.message_converter import (
     convert_openai_to_responses_format,
     convert_tools_for_responses,
@@ -129,10 +129,17 @@ class ChatAPI:
             "temperature": temperature,
             "stream": stream,
         }
-        if "tools" in kwargs:
-            payload["tools"] = kwargs["tools"]
-        if "tool_choice" in kwargs:
-            payload["tool_choice"] = kwargs["tool_choice"]
+
+        # 检查模型是否支持工具调用
+        if is_tools_supported(model):
+            if "tools" in kwargs:
+                payload["tools"] = kwargs["tools"]
+            if "tool_choice" in kwargs:
+                payload["tool_choice"] = kwargs["tool_choice"]
+        elif "tools" in kwargs:
+            # 模型不支持工具调用，记录警告并跳过
+            logger.warning(f"Model {model} does not support tools, ignoring tools parameter")
+
         return payload
 
     async def stream_chat(
