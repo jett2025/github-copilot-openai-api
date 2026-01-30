@@ -11,6 +11,7 @@ from loguru import logger
 
 from api.chat_stream import run_stream, run
 from config import MODEL_MAPPING
+from exceptions import UpstreamAPIError, CopilotAPIError
 from middleware.auth import require_api_key
 
 router = APIRouter(prefix="/v1", tags=["chat"])
@@ -65,6 +66,11 @@ async def chat_completions(request: Request, _: None = Depends(require_api_key))
                     async for chunk in run_stream(data):
                         logger.debug(chunk)
                         yield chunk
+                except UpstreamAPIError as e:
+                    # 上游 API 错误，发送错误事件
+                    logger.error(f"Upstream API error in stream: {e.message}")
+                    error_response = json.dumps(e.to_openai_error())
+                    yield f"data: {error_response}\n\n"
                 except Exception as e:
                     logger.exception("Exception occurred: {}", e)
                     error_response = json.dumps(
@@ -82,6 +88,12 @@ async def chat_completions(request: Request, _: None = Depends(require_api_key))
                 response = await run(data)
                 logger.debug(f"Non-streaming response: {response}")
                 return JSONResponse(content=response)
+            except UpstreamAPIError as e:
+                logger.error(f"Upstream API error: {e.message}")
+                return JSONResponse(
+                    status_code=e.status_code,
+                    content=e.to_openai_error(),
+                )
             except Exception as e:
                 logger.exception("Exception occurred: {}", e)
                 return JSONResponse(
@@ -89,6 +101,12 @@ async def chat_completions(request: Request, _: None = Depends(require_api_key))
                     content={"error": {"message": str(e), "type": "server_error"}},
                 )
 
+    except UpstreamAPIError as e:
+        logger.error(f"Upstream API error: {e.message}")
+        return JSONResponse(
+            status_code=e.status_code,
+            content=e.to_openai_error(),
+        )
     except ValueError as e:
         logger.exception("Exception occurred: {}", e)
         return JSONResponse(

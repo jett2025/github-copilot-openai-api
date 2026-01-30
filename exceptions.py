@@ -86,3 +86,21 @@ class StreamError(CopilotAPIError):
 
     def __init__(self, message: str = "Stream processing error"):
         super().__init__(message, status_code=500)
+
+
+class UpstreamAPIError(CopilotAPIError):
+    """上游 API 错误（如 GitHub Copilot API 返回的错误）"""
+
+    def __init__(self, message: str, status_code: int = 500, error_type: str = "upstream_error"):
+        super().__init__(message, status_code=status_code)
+        self.error_type = error_type
+
+    def to_openai_error(self) -> dict:
+        """转换为 OpenAI 兼容的错误格式"""
+        return {
+            "error": {
+                "message": self.message,
+                "type": self.error_type,
+                "code": self.status_code,
+            }
+        }

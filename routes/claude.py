@@ -12,6 +12,7 @@ from loguru import logger
 
 from api.chat_stream import run_stream, run
 from config import MODEL_MAPPING
+from exceptions import UpstreamAPIError
 from middleware.auth import require_api_key
 from services.message_converter import (
     convert_claude_to_openai_messages,
@@ -63,11 +64,30 @@ async def claude_messages(request: Request, _: None = Depends(require_api_key)):
             claude_response = convert_openai_to_claude_response(response, target_model)
             return JSONResponse(content=claude_response)
 
+    except UpstreamAPIError as e:
+        logger.error(f"Upstream API error: {e.message}")
+        # Claude API 错误格式
+        return JSONResponse(
+            status_code=e.status_code,
+            content={
+                "type": "error",
+                "error": {
+                    "type": e.error_type,
+                    "message": e.message,
+                }
+            },
+        )
     except Exception as e:
         logger.exception("Claude API Exception: {}", e)
         return JSONResponse(
             status_code=500,
-            content={"error": {"message": str(e), "type": "server_error"}},
+            content={
+                "type": "error",
+                "error": {
+                    "type": "server_error",
+                    "message": str(e),
+                }
+            },
         )
 
 
@@ -89,6 +109,12 @@ async def _claude_stream_generator(internal_data: dict, target_model: str):
                     chunk_json = json.loads(data_content)
                 except json.JSONDecodeError:
                     continue
+
+                # 检查是否是错误响应
+                if "error" in chunk_json:
+                    error_info = chunk_json["error"]
+                    yield f'event: error\ndata: {{"type": "error", "error": {{"type": "{error_info.get("type", "server_error")}", "message": {json.dumps(error_info.get("message", "Unknown error"))}}}}}\n\n'
+                    return
 
                 delta = chunk_json.get("choices", [{}])[0].get("delta", {})
 
@@ -123,8 +149,14 @@ async def _claude_stream_generator(internal_data: dict, target_model: str):
                             current_tool_call["input"] += tc_args
                             yield f'event: content_block_delta\ndata: {{"type": "content_block_delta", "index": {content_index}, "delta": {{"type": "input_json_delta", "partial_json": {json.dumps(tc_args)}}}}}\n\n'
 
+    except UpstreamAPIError as e:
+        logger.error(f"Upstream API error in Claude stream: {e.message}")
+        yield f'event: error\ndata: {{"type": "error", "error": {{"type": "{e.error_type}", "message": {json.dumps(e.message)}}}}}\n\n'
+        return
     except Exception as e:
         logger.exception("Claude stream error: {}", e)
+        yield f'event: error\ndata: {{"type": "error", "error": {{"type": "server_error", "message": {json.dumps(str(e))}}}}}\n\n'
+        return
 
     # 关闭所有 content block
     if has_text_block or current_tool_call:

@@ -13,6 +13,7 @@ import async_lru
 from loguru import logger
 
 from config import copilot_config, is_responses_model
+from exceptions import UpstreamAPIError
 from services.message_converter import (
     convert_openai_to_responses_format,
     convert_tools_for_responses,
@@ -62,6 +63,23 @@ class ChatAPI:
     def _is_retryable_exception(self, e: Exception) -> bool:
         """检查异常是否可重试"""
         return isinstance(e, self.retry_config.retryable_exceptions)
+
+    def _get_error_type(self, status_code: int) -> str:
+        """根据 HTTP 状态码返回对应的错误类型"""
+        error_types = {
+            400: "invalid_request_error",
+            401: "authentication_error",
+            403: "permission_error",
+            404: "not_found_error",
+            413: "request_too_large",
+            422: "invalid_request_error",
+            429: "rate_limit_error",
+            500: "server_error",
+            502: "server_error",
+            503: "service_unavailable",
+            504: "timeout_error",
+        }
+        return error_types.get(status_code, "upstream_error")
 
     def _build_base_headers(self, copilot_token: str, accept: str = "application/json") -> Dict[str, str]:
         """
@@ -191,7 +209,11 @@ class ChatAPI:
                             for i, msg in enumerate(messages):
                                 msg_info = f"msg[{i}]: role={msg.get('role')}, has_content={msg.get('content') is not None}, has_tool_calls={'tool_calls' in msg}"
                                 logger.debug(msg_info)
-                            raise ValueError(f"status code：{response.status}，error message：{error_text}")
+                            raise UpstreamAPIError(
+                                message=f"Upstream API error: {error_text.strip()}",
+                                status_code=response.status,
+                                error_type=self._get_error_type(response.status)
+                            )
 
                         # 成功连接，开始处理流式响应
                         async for line in response.content:
@@ -379,7 +401,11 @@ class ChatAPI:
 
                             logger.error(f"Chat API error: model={model}, status={response.status}, payload_keys={list(payload.keys())}, tools_count={len(payload.get('tools', []))}")
                             logger.error(f"Error response: {error_text[:500]}")
-                            raise ValueError(f"status code：{response.status}，error message：{error_text}")
+                            raise UpstreamAPIError(
+                                message=f"Upstream API error: {error_text.strip()}",
+                                status_code=response.status,
+                                error_type=self._get_error_type(response.status)
+                            )
 
                         response_data = await response.json()
                         choice = response_data.get("choices", [{}])[0]
@@ -498,7 +524,11 @@ class ChatAPI:
                                 )
                                 await asyncio.sleep(delay)
                                 continue
-                            raise ValueError(f"Responses API error, status: {response.status}, message: {error_text}")
+                            raise UpstreamAPIError(
+                                message=f"Upstream API error: {error_text.strip()}",
+                                status_code=response.status,
+                                error_type=self._get_error_type(response.status)
+                            )
 
                         buffer = ""
                         async for chunk in response.content.iter_any():
@@ -697,7 +727,11 @@ class ChatAPI:
                                 )
                                 await asyncio.sleep(delay)
                                 continue
-                            raise ValueError(f"Responses API error, status: {response.status}, message: {error_text}")
+                            raise UpstreamAPIError(
+                                message=f"Upstream API error: {error_text.strip()}",
+                                status_code=response.status,
+                                error_type=self._get_error_type(response.status)
+                            )
 
                         response_data = await response.json()
                         logger.debug(f"Responses API response: {json.dumps(response_data, ensure_ascii=False)}")

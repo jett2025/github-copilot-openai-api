@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from loguru import logger
 
 from api.chat_stream import run_stream, run
+from exceptions import UpstreamAPIError
 from middleware.auth import require_api_key
 
 router = APIRouter(prefix="/v1", tags=["responses"])
@@ -56,6 +57,9 @@ async def responses_api(request: Request, _: None = Depends(require_api_key)):
                 try:
                     async for chunk in run_stream(chat_data):
                         yield chunk
+                except UpstreamAPIError as e:
+                    logger.error(f"Upstream API error in responses stream: {e.message}")
+                    yield f'data: {json.dumps(e.to_openai_error())}\n\n'
                 except Exception as e:
                     logger.exception("Responses stream error: {}", e)
                     yield f'data: {json.dumps({"error": {"message": str(e)}})}\n\n'
@@ -84,6 +88,12 @@ async def responses_api(request: Request, _: None = Depends(require_api_key)):
                 "usage": response.get("usage", {})
             })
 
+    except UpstreamAPIError as e:
+        logger.error(f"Upstream API error: {e.message}")
+        return JSONResponse(
+            status_code=e.status_code,
+            content=e.to_openai_error()
+        )
     except Exception as e:
         logger.exception("Responses API error: {}", e)
         return JSONResponse(
