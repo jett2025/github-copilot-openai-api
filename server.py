@@ -21,7 +21,11 @@ from routes import (
     models_router,
     usage_router,
 )
-from api.chat_stream import close_http_client
+from api.chat_stream import (
+    close_http_client,
+    start_token_refresh_task,
+    stop_token_refresh_task,
+)
 
 
 @asynccontextmanager
@@ -29,9 +33,13 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时
     logger.info("Application starting up...")
+    # 启动后台 Token 刷新任务
+    await start_token_refresh_task()
     yield
     # 关闭时
     logger.info("Application shutting down...")
+    # 停止后台任务
+    await stop_token_refresh_task()
     await close_http_client()
 
 

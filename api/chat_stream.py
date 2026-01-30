@@ -6,6 +6,7 @@
 
 from typing import Optional, AsyncGenerator, Dict, Any
 import asyncio
+import time
 
 import aiohttp
 import base64
@@ -78,6 +79,79 @@ async def close_http_client():
         logger.info("Closed global HTTP connection pool")
 
 
+# ==================== 后台 Token 刷新 ====================
+
+# Token 刷新配置
+TOKEN_REFRESH_INTERVAL = 25 * 60  # 25 分钟刷新一次
+_token_refresh_task: Optional[asyncio.Task] = None
+_cached_copilot_token: Optional[str] = None
+_cached_copilot_token_time: float = 0
+
+
+async def _refresh_copilot_token():
+    """刷新 Copilot Token（内部使用）"""
+    global _cached_copilot_token, _cached_copilot_token_time
+
+    token = await get_token()
+    if not token:
+        logger.warning("No GitHub token available for Copilot token refresh")
+        return
+
+    try:
+        chat = ChatAPI(token)
+        # 清除缓存强制刷新
+        chat.get_copilot_token.cache_clear()
+        copilot_token = await chat.get_copilot_token()
+        _cached_copilot_token = copilot_token
+        _cached_copilot_token_time = time.time()
+        logger.info("Copilot token refreshed successfully")
+    except Exception as e:
+        logger.error(f"Failed to refresh Copilot token: {e}")
+
+
+async def _token_refresh_loop():
+    """后台 Token 刷新循环"""
+    logger.info(f"Starting background token refresh task (interval: {TOKEN_REFRESH_INTERVAL}s)")
+
+    # 启动时立即刷新一次
+    await _refresh_copilot_token()
+
+    while True:
+        try:
+            await asyncio.sleep(TOKEN_REFRESH_INTERVAL)
+            await _refresh_copilot_token()
+        except asyncio.CancelledError:
+            logger.info("Token refresh task cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Error in token refresh loop: {e}")
+            # 出错后等待一段时间再重试
+            await asyncio.sleep(60)
+
+
+async def start_token_refresh_task():
+    """启动后台 Token 刷新任务"""
+    global _token_refresh_task
+
+    if _token_refresh_task is None or _token_refresh_task.done():
+        _token_refresh_task = asyncio.create_task(_token_refresh_loop())
+        logger.info("Background token refresh task started")
+
+
+async def stop_token_refresh_task():
+    """停止后台 Token 刷新任务"""
+    global _token_refresh_task
+
+    if _token_refresh_task is not None and not _token_refresh_task.done():
+        _token_refresh_task.cancel()
+        try:
+            await _token_refresh_task
+        except asyncio.CancelledError:
+            pass
+        _token_refresh_task = None
+        logger.info("Background token refresh task stopped")
+
+
 async def get_token() -> Optional[str]:
     """获取认证令牌"""
     auth_methods = [
@@ -111,7 +185,6 @@ async def get_models(force_refresh: bool = False) -> Dict[str, Any]:
         包含模型列表的字典
     """
     global _models_cache, _models_cache_time
-    import time
 
     # 检查缓存是否有效
     current_time = time.time()
