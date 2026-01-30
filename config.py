@@ -87,25 +87,6 @@ def is_responses_model(model: str) -> bool:
     return any(m in model_lower for m in ["codex"])
 
 
-def is_tools_supported(model: str) -> bool:
-    """
-    检查模型是否支持工具调用 (tools/function calling)
-
-    目前已知不支持 tools 的模型：
-    - Gemini 系列
-
-    Args:
-        model: 模型名称
-
-    Returns:
-        是否支持工具调用
-    """
-    model_lower = model.lower()
-    # Gemini 模型不支持 tools
-    unsupported_patterns = ["gemini"]
-    return not any(pattern in model_lower for pattern in unsupported_patterns)
-
-
 # 全局配置实例
 server_config = ServerConfig()
 copilot_config = CopilotConfig()

@@ -12,7 +12,7 @@ import aiohttp
 import async_lru
 from loguru import logger
 
-from config import copilot_config, is_responses_model, is_tools_supported
+from config import copilot_config, is_responses_model
 from services.message_converter import (
     convert_openai_to_responses_format,
     convert_tools_for_responses,
@@ -130,15 +130,18 @@ class ChatAPI:
             "stream": stream,
         }
 
-        # 检查模型是否支持工具调用
-        if is_tools_supported(model):
+        # Gemini 模型通过 GitHub Copilot API 可能不支持 tools
+        # 其他模型正常传递 tools 参数
+        model_lower = model.lower()
+        is_gemini = "gemini" in model_lower
+
+        if is_gemini and "tools" in kwargs:
+            logger.warning(f"Model {model} may not support tools via Copilot API, skipping tools parameter")
+        else:
             if "tools" in kwargs:
                 payload["tools"] = kwargs["tools"]
             if "tool_choice" in kwargs:
                 payload["tool_choice"] = kwargs["tool_choice"]
-        elif "tools" in kwargs:
-            # 模型不支持工具调用，记录警告并跳过
-            logger.warning(f"Model {model} does not support tools, ignoring tools parameter")
 
         return payload
 
@@ -352,6 +355,7 @@ class ChatAPI:
         payload = self._build_payload(messages, model, temperature, stream=False, **kwargs)
 
         logger.debug(f"Chat API payload: model={model}, tools_count={len(kwargs.get('tools', []))}")
+        logger.debug(f"Chat API full payload: {json.dumps(payload, ensure_ascii=False, default=str)[:2000]}")
 
         last_exception = None
         session = await self._get_session()
