@@ -4,7 +4,8 @@ GitHub Copilot API 服务入口
 提供 OpenAI API 兼容的接口，支持 Chat Completions、Claude Messages 和 Responses API。
 """
 
-import os
+from contextlib import asynccontextmanager
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
@@ -20,12 +21,26 @@ from routes import (
     models_router,
     usage_router,
 )
+from api.chat_stream import close_http_client
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    # 启动时
+    logger.info("Application starting up...")
+    yield
+    # 关闭时
+    logger.info("Application shutting down...")
+    await close_http_client()
+
 
 # 创建 FastAPI 应用
 app = FastAPI(
     title="GitHub Copilot API",
     description="OpenAI API 兼容的 GitHub Copilot 代理服务",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS 中间件

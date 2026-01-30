@@ -4,7 +4,7 @@ GitHub Copilot Chat API 客户端
 提供与 GitHub Copilot API 交互的功能。
 """
 
-from typing import List, Dict, Any, AsyncGenerator
+from typing import List, Dict, Any, AsyncGenerator, Optional, TYPE_CHECKING
 import asyncio
 import time
 import json
@@ -19,6 +19,10 @@ from services.message_converter import (
 )
 from utils.retry import RetryConfig, calculate_backoff_delay
 
+# 避免循环导入
+if TYPE_CHECKING:
+    from api.chat_stream import get_http_client
+
 
 class ChatAPI:
     """聊天 API 实现"""
@@ -31,9 +35,25 @@ class ChatAPI:
         exponential_base=2.0,
     )
 
-    def __init__(self, token: str):
+    def __init__(self, token: str, session: Optional[aiohttp.ClientSession] = None):
+        """
+        初始化 ChatAPI
+
+        Args:
+            token: GitHub 认证令牌
+            session: 可选的 aiohttp ClientSession，用于连接池复用
+        """
         self.token = token
         self.retry_config = self.DEFAULT_RETRY_CONFIG
+        self._session = session
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """获取 HTTP 会话，优先使用全局连接池"""
+        if self._session is not None and not self._session.closed:
+            return self._session
+        # 延迟导入避免循环依赖
+        from api.chat_stream import get_http_client
+        return await get_http_client()
 
     def _is_retryable_status(self, status: int) -> bool:
         """检查 HTTP 状态码是否可重试"""
@@ -138,14 +158,15 @@ class ChatAPI:
         logger.debug(f"Chat API stream request: model={model}, messages_count={len(messages)}, tools_count={len(kwargs.get('tools', []))}")
 
         last_exception = None
+        session = await self._get_session()
+
         for attempt in range(self.retry_config.max_retries + 1):
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                            url=copilot_config.chat_completions_url,
-                            headers=headers,
-                            json=payload
-                    ) as response:
+                async with session.post(
+                        url=copilot_config.chat_completions_url,
+                        headers=headers,
+                        json=payload
+                ) as response:
                         if response.status != 200:
                             error_text = await response.text()
                             # 检查是否可重试的状态码
@@ -250,26 +271,58 @@ class ChatAPI:
     @async_lru.alru_cache(ttl=2 * 60 * 60)
     async def get_copilot_token(self) -> str:
         """获取 Copilot token"""
-        async with aiohttp.ClientSession() as session:
+        session = await self._get_session()
+        async with session.get(
+                url=copilot_config.token_url,
+                headers={
+                    "Authorization": f"Bearer {self.token}",
+                    "Accept": "application/json",
+                    "User-Agent": "Mozilla/5.0",
+                }
+        ) as response:
+            if response.status != 200:
+                error_text = await response.text()
+                raise ValueError(
+                    f"Get token error, status code: {response.status}, error message: {error_text}")
+
+            data = await response.json()
+            token = data.get("token")
+            logger.info(f"Get Copilot token: {token[:50]}..." if token else "Get Copilot token: None")
+            if not token:
+                raise ValueError("No token")
+            return token
+
+    async def get_models(self) -> Dict[str, Any]:
+        """
+        动态获取可用模型列表
+
+        Returns:
+            包含模型列表的字典，格式: {"object": "list", "data": [...]}
+        """
+        copilot_token = await self.get_copilot_token()
+        if not copilot_token:
+            raise ValueError("No Copilot token")
+
+        headers = self._build_base_headers(copilot_token, accept="application/json")
+        session = await self._get_session()
+
+        try:
             async with session.get(
-                    url=copilot_config.token_url,
-                    headers={
-                        "Authorization": f"Bearer {self.token}",
-                        "Accept": "application/json",
-                        "User-Agent": "Mozilla/5.0",
-                    }
+                    url=copilot_config.models_url,
+                    headers=headers
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    raise ValueError(
-                        f"Get token error, status code: {response.status}, error message: {error_text}")
+                    logger.error(f"Get models error: status={response.status}, error={error_text}")
+                    return {"object": "list", "data": []}
 
                 data = await response.json()
-                token = data.get("token")
-                logger.info(f"Get Copilot token: {token}")
-                if not token:
-                    raise ValueError("No token")
-                return token
+                logger.debug(f"Got {len(data.get('data', []))} models from API")
+                return data
+
+        except Exception as e:
+            logger.error(f"Get models failed: {e}")
+            return {"object": "list", "data": []}
 
     async def chat(
             self,
@@ -294,14 +347,15 @@ class ChatAPI:
         logger.debug(f"Chat API payload: model={model}, tools_count={len(kwargs.get('tools', []))}")
 
         last_exception = None
+        session = await self._get_session()
+
         for attempt in range(self.retry_config.max_retries + 1):
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                            url=copilot_config.chat_completions_url,
-                            headers=headers,
-                            json=payload
-                    ) as response:
+                async with session.post(
+                        url=copilot_config.chat_completions_url,
+                        headers=headers,
+                        json=payload
+                ) as response:
                         if response.status != 200:
                             error_text = await response.text()
                             # 检查是否可重试的状态码
@@ -414,17 +468,15 @@ class ChatAPI:
 
         logger.debug(f"Responses API payload: {json.dumps(payload, ensure_ascii=False)}")
 
-        connector = aiohttp.TCPConnector(limit=100)
-        timeout = aiohttp.ClientTimeout(total=300)
+        session = await self._get_session()
 
         for attempt in range(self.retry_config.max_retries + 1):
             try:
-                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-                    async with session.post(
-                            url=copilot_config.responses_url,
-                            headers=headers,
-                            json=payload
-                    ) as response:
+                async with session.post(
+                        url=copilot_config.responses_url,
+                        headers=headers,
+                        json=payload
+                ) as response:
                         if response.status != 200:
                             error_text = await response.text()
                             # 检查是否可重试的状态码
@@ -615,14 +667,15 @@ class ChatAPI:
         logger.debug(f"Responses API payload: {json.dumps(payload, ensure_ascii=False)}")
 
         last_exception = None
+        session = await self._get_session()
+
         for attempt in range(self.retry_config.max_retries + 1):
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                            url=copilot_config.responses_url,
-                            headers=headers,
-                            json=payload
-                    ) as response:
+                async with session.post(
+                        url=copilot_config.responses_url,
+                        headers=headers,
+                        json=payload
+                ) as response:
                         if response.status != 200:
                             error_text = await response.text()
                             # 检查是否可重试的状态码

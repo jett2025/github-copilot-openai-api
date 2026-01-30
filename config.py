@@ -27,6 +27,7 @@ class CopilotConfig:
     """Copilot API 配置"""
     chat_completions_url: str = "https://api.githubcopilot.com/chat/completions"
     responses_url: str = "https://api.githubcopilot.com/responses"
+    models_url: str = "https://api.githubcopilot.com/models"
     token_url: str = "https://api.github.com/copilot_internal/v2/token"
     device_code_url: str = "https://github.com/login/device/code"
     oauth_token_url: str = "https://github.com/login/oauth/access_token"
