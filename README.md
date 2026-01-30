@@ -269,7 +269,7 @@ _注：设置 `MODEL_MAPPING` 后将完全覆盖默认映射，未映射的模�
 
 ```powershell
 $env:ANTHROPIC_BASE_URL = "http://你的服务器IP:43953"
-$env:ANTHROPIC_API_KEY = "docker-compose.yml environment 下设置的 API_KEY"
+$env:ANTHROPIC_AUTH_TOKEN = "docker-compose.yml environment 下设置的 API_KEY"
 $env:ANTHROPIC_MODEL = "claude-opus-4-5-20251101"
 $env:ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-opus-4-5-20251101"
 $env:ANTHROPIC_DEFAULT_SONNET_MODEL = "claude-sonnet-4-5-20250929"
@@ -283,7 +283,7 @@ $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 
 ```bash
 export ANTHROPIC_BASE_URL="http://你的服务器IP:43953"
-export ANTHROPIC_API_KEY="docker-compose.yml environment 下设置的 API_KEY"
+export ANTHROPIC_AUTH_TOKEN="docker-compose.yml environment 下设置的 API_KEY"
 export ANTHROPIC_MODEL="claude-opus-4-5-20251101"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-4-5-20251101"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4-5-20250929"
