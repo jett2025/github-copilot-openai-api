@@ -27,10 +27,10 @@ _client_lock = asyncio.Lock()
 
 # 连接池配置
 HTTP_POOL_CONFIG = {
-    "limit": 100,              # 最大连接数
+    "limit": 300,              # 最大连接数
     "limit_per_host": 30,      # 每个主机最大连接数
     "ttl_dns_cache": 300,      # DNS 缓存时间（秒）
-    "keepalive_timeout": 60,   # Keep-alive 超时（秒）
+    "keepalive_timeout": 90,   # Keep-alive 超时（秒）
 }
 
 
@@ -56,7 +56,7 @@ async def get_http_client() -> aiohttp.ClientSession:
                     keepalive_timeout=HTTP_POOL_CONFIG["keepalive_timeout"],
                     enable_cleanup_closed=True,
                 )
-                timeout = aiohttp.ClientTimeout(total=300, connect=30)
+                timeout = aiohttp.ClientTimeout(total=300, connect=60)
                 _http_client = aiohttp.ClientSession(
                     connector=connector,
                     timeout=timeout,
