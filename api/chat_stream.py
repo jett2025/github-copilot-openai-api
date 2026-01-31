@@ -257,9 +257,62 @@ MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
 IMAGE_DOWNLOAD_TIMEOUT = 10  # 秒
 
 
+async def _download_single_image(
+    session: aiohttp.ClientSession,
+    image_url_obj: dict,
+    url: str,
+    timeout: aiohttp.ClientTimeout
+) -> None:
+    """
+    下载单张图片并转换为 Base64
+
+    Args:
+        session: aiohttp 会话
+        image_url_obj: 图片 URL 对象（会被原地修改）
+        url: 图片 URL
+        timeout: 超时配置
+    """
+    try:
+        async with session.get(url, timeout=timeout) as resp:
+            if resp.status != 200:
+                logger.debug(f"Image download failed with status {resp.status}: {url[:100]}")
+                return
+
+            # 检查 Content-Length 头
+            content_length = resp.headers.get("Content-Length")
+            if content_length and int(content_length) > MAX_IMAGE_SIZE:
+                logger.warning(f"Image too large (Content-Length: {content_length}), skipping: {url[:100]}")
+                return
+
+            # 流式读取并检查大小
+            chunks = []
+            total_size = 0
+            async for chunk in resp.content.iter_chunked(64 * 1024):  # 64KB chunks
+                total_size += len(chunk)
+                if total_size > MAX_IMAGE_SIZE:
+                    logger.warning(f"Image exceeded {MAX_IMAGE_SIZE} bytes during download, skipping: {url[:100]}")
+                    return
+                chunks.append(chunk)
+
+            # 转换为 Base64
+            data = b"".join(chunks)
+            mime_type = resp.headers.get("Content-Type", "image/jpeg")
+            # 确保 mime_type 是有效的图片类型
+            if not mime_type.startswith("image/"):
+                mime_type = "image/jpeg"
+            base64_data = base64.b64encode(data).decode("utf-8")
+            image_url_obj["url"] = f"data:{mime_type};base64,{base64_data}"
+
+    except asyncio.TimeoutError:
+        logger.warning(f"Image download timeout: {url[:100]}")
+    except Exception as e:
+        # 下载失败则保持原样，让 GitHub 尝试处理
+        logger.debug(f"Image download failed: {e}")
+
+
 async def process_images(messages: list, session: aiohttp.ClientSession = None) -> list:
     """
-    处理消息中的图片 URL，将其转换为 Base64 以提高兼容性
+    处理消息中的图片 URL，将其转换为 Base64 以提高兼容性（并行下载）
 
     Args:
         messages: 消息列表
@@ -275,6 +328,9 @@ async def process_images(messages: list, session: aiohttp.ClientSession = None) 
 
     timeout = aiohttp.ClientTimeout(total=IMAGE_DOWNLOAD_TIMEOUT)
 
+    # 收集所有需要下载的图片任务
+    download_tasks = []
+
     for msg in messages:
         content = msg.get("content")
         if isinstance(content, list):
@@ -282,40 +338,17 @@ async def process_images(messages: list, session: aiohttp.ClientSession = None) 
                 if isinstance(item, dict) and item.get("type") == "image_url":
                     image_url_obj = item.get("image_url", {})
                     url = image_url_obj.get("url")
-                    # 如果是远程 URL 且不是 Base64，则尝试下载并转换
+                    # 如果是远程 URL 且不是 Base64，则添加到下载任务列表
                     if url and url.startswith("http") and not url.startswith("data:"):
-                        try:
-                            async with session.get(url, timeout=timeout) as resp:
-                                if resp.status == 200:
-                                    # 检查 Content-Length 头
-                                    content_length = resp.headers.get("Content-Length")
-                                    if content_length and int(content_length) > MAX_IMAGE_SIZE:
-                                        logger.warning(f"Image too large (Content-Length: {content_length}), skipping: {url[:100]}")
-                                        continue
+                        download_tasks.append(
+                            _download_single_image(session, image_url_obj, url, timeout)
+                        )
 
-                                    # 流式读取并检查大小
-                                    chunks = []
-                                    total_size = 0
-                                    async for chunk in resp.content.iter_chunked(64 * 1024):  # 64KB chunks
-                                        total_size += len(chunk)
-                                        if total_size > MAX_IMAGE_SIZE:
-                                            logger.warning(f"Image exceeded {MAX_IMAGE_SIZE} bytes during download, skipping: {url[:100]}")
-                                            break
-                                        chunks.append(chunk)
-                                    else:
-                                        # 只有在没有超出限制时才处理
-                                        data = b"".join(chunks)
-                                        mime_type = resp.headers.get("Content-Type", "image/jpeg")
-                                        # 确保 mime_type 是有效的图片类型
-                                        if not mime_type.startswith("image/"):
-                                            mime_type = "image/jpeg"
-                                        base64_data = base64.b64encode(data).decode("utf-8")
-                                        image_url_obj["url"] = f"data:{mime_type};base64,{base64_data}"
-                        except asyncio.TimeoutError:
-                            logger.warning(f"Image download timeout: {url[:100]}")
-                        except Exception as e:
-                            # 下载失败则保持原样，让 GitHub 尝试处理
-                            logger.debug(f"Image download failed: {e}")
+    # 并行下载所有图片
+    if download_tasks:
+        logger.debug(f"Downloading {len(download_tasks)} images in parallel")
+        await asyncio.gather(*download_tasks, return_exceptions=True)
+
     return messages
 
 
