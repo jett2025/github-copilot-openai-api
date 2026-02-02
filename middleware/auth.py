@@ -16,6 +16,11 @@ def verify_api_key(request: Request) -> Tuple[bool, Optional[str]]:
     """
     验证请求中的 API 密钥
 
+    支持三种方式：
+    1. Authorization: Bearer <key>
+    2. x-api-key: <key>
+    3. URL 参数: ?api_key=<key>
+
     Args:
         request: FastAPI 请求对象
 
@@ -28,21 +33,22 @@ def verify_api_key(request: Request) -> Tuple[bool, Optional[str]]:
     if not server_auth_key:
         return True, None
 
-    # 获取请求中的 Authorization header
+    # 1. 检查 Authorization header
     auth_header = request.headers.get("Authorization")
+    if auth_header == f"Bearer {server_auth_key}":
+        return True, None
 
-    if not auth_header:
-        return False, "Missing Authorization header"
+    # 2. 检查 x-api-key header
+    x_api_key = request.headers.get("x-api-key")
+    if x_api_key == server_auth_key:
+        return True, None
 
-    # 支持 Bearer token 格式
-    expected_token = f"Bearer {server_auth_key}"
-    if auth_header != expected_token:
-        # 也支持 x-api-key 格式
-        x_api_key = request.headers.get("x-api-key")
-        if x_api_key != server_auth_key:
-            return False, "Invalid API key"
+    # 3. 检查 URL 参数
+    url_api_key = request.query_params.get("api_key")
+    if url_api_key == server_auth_key:
+        return True, None
 
-    return True, None
+    return False, "Invalid API key"
 
 
 def require_api_key(request: Request) -> None:

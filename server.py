@@ -14,6 +14,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from config import server_config
 from routes import (
+    admin_router,
     auth_router,
     chat_router,
     claude_router,
@@ -61,6 +62,7 @@ app.add_middleware(
 )
 
 # 注册路由
+app.include_router(admin_router)
 app.include_router(auth_router)
 app.include_router(chat_router)
 app.include_router(claude_router)

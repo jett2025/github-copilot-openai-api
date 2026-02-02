@@ -4,6 +4,7 @@
 包含所有 API 路由定义。
 """
 
+from routes.admin import router as admin_router
 from routes.auth import router as auth_router
 from routes.chat import router as chat_router
 from routes.claude import router as claude_router
@@ -12,6 +13,7 @@ from routes.models import router as models_router
 from routes.usage import router as usage_router
 
 __all__ = [
+    "admin_router",
     "auth_router",
     "chat_router",
     "claude_router",

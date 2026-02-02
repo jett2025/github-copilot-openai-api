@@ -148,6 +148,7 @@ github-copilot-openai-api/
 ├── middleware/
 │   └── auth.py            # API 认证中间件
 ├── routes/
+│   ├── admin.py           # /admin/* 管理路由（热重载）
 │   ├── auth.py            # /auth/* 路由
 │   ├── chat.py            # /v1/chat/completions 路由
 │   ├── claude.py          # /v1/messages 路由
@@ -307,6 +308,41 @@ export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1"
 | `GET /v1/models`            | 获取支持的模型列表                          |
 | `GET /auth/device`          | 设备认证页面                                |
 | `GET /usage`                | 查询用量                                    |
+| `GET /admin/mapping`        | 查看/管理模型映射（热重载）                 |
+
+---
+
+## 🔥 模型映射热重载
+
+支持在不重启服务的情况下动态修改模型映射，通过浏览器直接访问 URL 即可操作。
+
+### API 端点
+
+| 操作     | URL                                                            | 说明                                       |
+| -------- | -------------------------------------------------------------- | ------------------------------------------ |
+| 查看映射 | `/admin/mapping?api_key=<API_KEY>`                             | 返回当前生效的映射                         |
+| 添加映射 | `/admin/mapping/set?api_key=<API_KEY>&from=<源模型>&to=<目标>` | 添加或更新单个映射                         |
+| 删除映射 | `/admin/mapping/del?api_key=<API_KEY>&from=<源模型>`           | 删除单个映射                               |
+| 重置映射 | `/admin/mapping/reset?api_key=<API_KEY>`                       | 恢复为初始配置（优先环境变量，否则代码默认值） |
+
+### 示例
+
+假设服务地址为 `http://localhost:43953`，API Key 为 `github-copilot-openai-api-key`：
+
+```bash
+# 查看当前映射
+curl "http://localhost:43953/admin/mapping?api_key=github-copilot-openai-api-key"
+
+# 添加映射：gpt-4 -> claude-sonnet-4.5
+curl "http://localhost:43953/admin/mapping/set?api_key=github-copilot-openai-api-key&from=gpt-4&to=claude-sonnet-4.5"
+
+# 删除映射
+curl "http://localhost:43953/admin/mapping/del?api_key=github-copilot-openai-api-key&from=gpt-4"
+
+# 重置为初始配置（环境变量或代码默认值）
+curl "http://localhost:43953/admin/mapping/reset?api_key=github-copilot-openai-api-key"
+```
+
 
 ### 使用示例
 

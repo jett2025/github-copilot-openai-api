@@ -91,3 +91,10 @@ def is_responses_model(model: str) -> bool:
 server_config = ServerConfig()
 copilot_config = CopilotConfig()
 MODEL_MAPPING = load_model_mapping()
+
+
+def update_model_mapping(new_mapping: Dict[str, str]) -> None:
+    """热更新模型映射（不重启服务）"""
+    MODEL_MAPPING.clear()
+    MODEL_MAPPING.update(new_mapping)
+    logger.info(f"Model mapping updated: {MODEL_MAPPING}")
