@@ -11,7 +11,7 @@ import time
 import aiohttp
 import base64
 
-from api.chat_api import ChatAPI
+from api.chat_api import ChatAPI, clear_copilot_token_cache
 from auth.device_auth import DeviceAuth
 from auth.envs_auth import EnvsAuth
 from auth.hosts_auth import HostsAuth
@@ -98,9 +98,10 @@ async def _refresh_copilot_token():
         return
 
     try:
+        # 清除全局缓存强制刷新
+        clear_copilot_token_cache()
+        
         chat = ChatAPI(token)
-        # 清除缓存强制刷新
-        chat.get_copilot_token.cache_clear()
         copilot_token = await chat.get_copilot_token()
         _cached_copilot_token = copilot_token
         _cached_copilot_token_time = time.time()

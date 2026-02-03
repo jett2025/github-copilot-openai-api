@@ -9,7 +9,6 @@ import asyncio
 import time
 import json
 import aiohttp
-import async_lru
 from loguru import logger
 
 from config import copilot_config, is_responses_model
@@ -23,6 +22,80 @@ from utils.retry import RetryConfig, calculate_backoff_delay
 # 避免循环导入
 if TYPE_CHECKING:
     from api.chat_stream import get_http_client
+
+
+# ==================== 全局 Copilot Token 缓存 ====================
+# 使用模块级缓存，所有 ChatAPI 实例共享
+_global_copilot_token: Optional[str] = None
+_global_copilot_token_github_token: Optional[str] = None  # 关联的 GitHub Token
+
+
+def _is_copilot_token_expired(token: str) -> bool:
+    """
+    检查 Copilot Token 是否过期
+    
+    Copilot Token 格式包含 exp=<timestamp> 字段，例如：
+    tid=xxx;exp=1234567890;sku=...
+    
+    Args:
+        token: Copilot Token 字符串
+        
+    Returns:
+        如果 Token 已过期或无法解析，返回 True
+    """
+    if not token:
+        return True
+    
+    try:
+        # 解析 Token 中的 exp 字段
+        exp_value = _extract_exp_from_token(token)
+        if exp_value is None:
+            logger.warning("Could not find exp field in Copilot token, assuming expired")
+            return True
+        
+        # 提前 60 秒判定过期，避免边界情况
+        current_time = time.time()
+        is_expired = exp_value <= (current_time + 60)
+        
+        if is_expired:
+            logger.debug(f"Token expired: exp={exp_value}, current={current_time}")
+        
+        return is_expired
+    except Exception as e:
+        logger.warning(f"Error checking token expiry: {e}, assuming expired")
+        return True
+
+
+def _extract_exp_from_token(token: str) -> Optional[int]:
+    """
+    从 Copilot Token 中提取过期时间戳
+    
+    Token 格式: key1=value1;key2=value2;exp=timestamp;...
+    
+    Args:
+        token: Copilot Token 字符串
+        
+    Returns:
+        过期时间戳（Unix timestamp），如果无法解析则返回 None
+    """
+    try:
+        pairs = token.split(';')
+        for pair in pairs:
+            if '=' in pair:
+                key, value = pair.split('=', 1)
+                if key.strip() == 'exp':
+                    return int(value.strip())
+        return None
+    except (ValueError, AttributeError):
+        return None
+
+
+def clear_copilot_token_cache():
+    """清除全局 Copilot Token 缓存"""
+    global _global_copilot_token, _global_copilot_token_github_token
+    _global_copilot_token = None
+    _global_copilot_token_github_token = None
+    logger.debug("Copilot token cache cleared")
 
 
 class ChatAPI:
@@ -293,9 +366,28 @@ class ChatAPI:
                     logger.error(f"Chat API failed after {self.retry_config.max_retries + 1} attempts: {e}")
                     raise
 
-    @async_lru.alru_cache(ttl=2 * 60 * 60)
     async def get_copilot_token(self) -> str:
-        """获取 Copilot token"""
+        """
+        获取 Copilot token
+        
+        使用全局缓存，并在返回前检查 Token 是否过期。
+        如果 Token 过期，则自动刷新。
+        """
+        global _global_copilot_token, _global_copilot_token_github_token
+        
+        # 检查全局缓存的 Token 是否有效
+        # 1. Token 存在
+        # 2. 是同一个 GitHub Token 获取的
+        # 3. Token 未过期
+        if (_global_copilot_token 
+            and _global_copilot_token_github_token == self.token 
+            and not _is_copilot_token_expired(_global_copilot_token)):
+            return _global_copilot_token
+        
+        if _global_copilot_token and _is_copilot_token_expired(_global_copilot_token):
+            logger.info("Cached Copilot token expired, refreshing...")
+        
+        # 获取新 Token
         session = await self._get_session()
         async with session.get(
                 url=copilot_config.token_url,
@@ -315,6 +407,10 @@ class ChatAPI:
             logger.info(f"Get Copilot token: {token[:50]}..." if token else "Get Copilot token: None")
             if not token:
                 raise ValueError("No token")
+            
+            # 更新全局缓存
+            _global_copilot_token = token
+            _global_copilot_token_github_token = self.token
             return token
 
     async def get_models(self) -> Dict[str, Any]:
