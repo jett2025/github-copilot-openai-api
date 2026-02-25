@@ -11,7 +11,7 @@ services:
       # 可选：设置API密钥
       - API_KEY=github-copilot-openai-api-key
       # 可选：自定义模型映射（JSON格式），不设置则使用默认映射
-      - MODEL_MAPPING={"gpt-4o-mini":"gemini-3-pro-preview","claude-haiku-4-5-20251001":"gpt-5.3-codex","claude-sonnet-4-6":"gpt-5.3-codex"}
+      - MODEL_MAPPING={"gpt-4o-mini":"gemini-3-pro-preview","claude-haiku-4-5-20251001":"gpt-5.3-codex","claude-sonnet-4-6":"gpt-5.3-codex","claude-opus-4-6":"claude-opus-4.6"}
     restart: unless-stopped
     volumes:
       # 保存认证信息的卷，避免重启后需要重新认证
