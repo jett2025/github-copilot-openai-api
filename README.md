@@ -246,15 +246,15 @@ github-copilot-openai-api/
 
 ```yaml
 environment:
-  - MODEL_MAPPING={"gpt-4o-mini":"claude-opus-4.5","claude-sonnet-4-5-20250929":"claude-sonnet-4.5","claude-haiku-4-5-20251001":"gpt-5.1-codex-max"}
+  - MODEL_MAPPING={"gpt-4o-mini":"gemini-3-pro-preview","claude-haiku-4-5-20251001":"gpt-5.3-codex","claude-sonnet-4-6":"gpt-5.3-codex"}
 ```
 
 **默认映射：**
 
 | 请求模型                   | 实际调用          |
 | -------------------------- | ----------------- |
-| gpt-4o-mini                | claude-opus-4.6   |
-| claude-haiku-4-5-20251001  | claude-haiku-4.6  |
+| gpt-o4-mini               | claude-opus-4.6   |
+| gpt-4o-mini  | claude-opus-4.6  |
 
 _注：设置 `MODEL_MAPPING` 后将完全覆盖默认映射，未映射的模型名将直接透传。_
 

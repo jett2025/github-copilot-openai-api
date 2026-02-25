@@ -41,7 +41,6 @@ class CopilotConfig:
 DEFAULT_MODEL_MAPPING: Dict[str, str] = {
     "gpt-o4-mini": "claude-opus-4.6",
     "gpt-4o-mini": "claude-opus-4.6",
-    "claude-haiku-4-5-20251001": "claude-opus-4.6",
 }
 
 # 需要使用 /responses API 的模型列表
