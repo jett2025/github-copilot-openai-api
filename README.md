@@ -253,10 +253,8 @@ environment:
 
 | 请求模型                   | 实际调用          |
 | -------------------------- | ----------------- |
-| gpt-4o-mini                | claude-opus-4.5   |
-| claude-opus-4-5-20251101   | claude-opus-4.5   |
-| claude-sonnet-4-5-20250929 | claude-sonnet-4.5 |
-| claude-haiku-4-5-20251001  | claude-haiku-4.5  |
+| gpt-4o-mini                | claude-opus-4.6   |
+| claude-haiku-4-5-20251001  | claude-haiku-4.6  |
 
 _注：设置 `MODEL_MAPPING` 后将完全覆盖默认映射，未映射的模型名将直接透传。_
 
@@ -271,9 +269,9 @@ _注：设置 `MODEL_MAPPING` 后将完全覆盖默认映射，未映射的模�
 ```powershell
 $env:ANTHROPIC_BASE_URL = "http://你的服务器IP:43953"
 $env:ANTHROPIC_AUTH_TOKEN = "docker-compose.yml environment 下设置的 API_KEY"
-$env:ANTHROPIC_MODEL = "claude-opus-4-5-20251101"
-$env:ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-opus-4-5-20251101"
-$env:ANTHROPIC_DEFAULT_SONNET_MODEL = "claude-sonnet-4-5-20250929"
+$env:ANTHROPIC_MODEL = "claude-opus-4.6"
+$env:ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-opus-4.6"
+$env:ANTHROPIC_DEFAULT_SONNET_MODEL = "claude-sonnet-4.6"
 $env:ANTHROPIC_SMALL_FAST_MODEL = "claude-haiku-4-5-20251001"
 $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = "claude-haiku-4-5-20251001"
 $env:DISABLE_NON_ESSENTIAL_MODEL_CALLS = "1"
@@ -285,9 +283,9 @@ $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
 ```bash
 export ANTHROPIC_BASE_URL="http://你的服务器IP:43953"
 export ANTHROPIC_AUTH_TOKEN="docker-compose.yml environment 下设置的 API_KEY"
-export ANTHROPIC_MODEL="claude-opus-4-5-20251101"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-4-5-20251101"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4-5-20250929"
+export ANTHROPIC_MODEL="claude-opus-4.6"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-4.6"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4.6"
 export ANTHROPIC_SMALL_FAST_MODEL="claude-haiku-4-5-20251001"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4-5-20251001"
 export DISABLE_NON_ESSENTIAL_MODEL_CALLS="1"
@@ -359,9 +357,9 @@ curl http://localhost:43953/v1/chat/completions \
 
 **直接支持：**
 
-- gpt-5.2 / gpt-5.2-codex / gpt-5.1-codex-max
-- claude-sonnet-4.5 / claude-opus-4.5 / claude-haiku-4.5
-- gemini-3-pro-preview / gemini-3-flash-preview
+- gpt-5.2 / gpt-5.2-codex / gpt-5.3-codex / gpt-5.1-codex-max
+- claude-sonnet-4.5 / claude-sonnet-4.6 / claude-opus-4.5 / claude-opus-4.6 / claude-haiku-4.5
+- gemini-3-pro-preview / gemini-3-flash-preview / gemini-3.1-pro-preview
 
 _注：模型映射配置请参考上方「配置项」章节。_
 

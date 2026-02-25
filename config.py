@@ -39,11 +39,9 @@ class CopilotConfig:
 
 # 默认模型映射配置
 DEFAULT_MODEL_MAPPING: Dict[str, str] = {
-    "gpt-o4-mini": "claude-opus-4.5",
-    "gpt-4o-mini": "claude-opus-4.5",
-    "claude-opus-4-5-20251101": "claude-opus-4.5",
-    "claude-sonnet-4-5-20250929": "claude-sonnet-4.5",
-    "claude-haiku-4-5-20251001": "claude-haiku-4.5",
+    "gpt-o4-mini": "claude-opus-4.6",
+    "gpt-4o-mini": "claude-opus-4.6",
+    "claude-haiku-4-5-20251001": "claude-opus-4.6",
 }
 
 # 需要使用 /responses API 的模型列表
@@ -53,6 +51,8 @@ RESPONSES_API_MODELS = [
     "gpt-5.1-codex-max",
     "gpt-5.2-codex",
     "gpt-5.2-codex-max",
+    "gpt-5.3-codex",
+    "gpt-5.3-codex-max",
 ]
 
 # 支持的模型列表
@@ -60,11 +60,15 @@ SUPPORTED_MODELS = [
     {"id": "gpt-5.1-codex-max", "object": "model"},
     {"id": "gpt-5.2-codex", "object": "model"},
     {"id": "gpt-5.2", "object": "model"},
+    {"id": "gpt-5.3-codex", "object": "model"},
     {"id": "claude-sonnet-4.5", "object": "model"},
+    {"id": "claude-sonnet-4.6", "object": "model"},
     {"id": "claude-opus-4.5", "object": "model"},
+    {"id": "claude-opus-4.6", "object": "model"},
     {"id": "claude-haiku-4.5", "object": "model"},
     {"id": "gemini-3-pro-preview", "object": "model"},
     {"id": "gemini-3-flash-preview", "object": "model"},
+    {"id": "gemini-3.1-pro-preview", "object": "model"},
 ]
 
 
